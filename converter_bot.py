@@ -22,8 +22,8 @@ BOT_TOKEN = "8270798642:AAGtdwHVgu0rKCwTU5x9eLLWWYGoWhG-j6I"   # <-- TOKEN
 ADMIN_ID  = 1113404703               # <-- ADMIN ID
 ADMIN_USERNAME = "@abdurakhmon02"   # <-- ADMIN USERNAME
 DONATE_URL = "https://donate.uz"    # <-- DONAT SAYTI
-DONATE_CARD = "8600 XXXX XXXX XXXX" # <-- KARTA RAQAMI
-DONATE_CLICK = "+998 XX XXX XX XX"  # <-- CLICK RAQAMI
+DONATE_CARD = "9860060926650809" # <-- KARTA RAQAMI
+DONATE_CLICK = "+998 94 975 03 04"  # <-- CLICK RAQAMI
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
