@@ -7,7 +7,7 @@
 ╚══════════════════════════════════════════════╝
 """
 
-import telebot
+import telebot, os
 import os
 import logging
 import sqlite3
