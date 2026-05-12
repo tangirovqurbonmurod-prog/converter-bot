@@ -429,7 +429,7 @@ def make_pdf(content, title, ud={}):
         logger.error(f"PDF error: {e}"); return None, None
 
 # ===== PPTX YARATISH =====
-def make_pptx(content, topic, style="klassik", ud={}):
+def make_pptx(content, topic, style="klassik", ud={}, uid2=None):
     try:
         from pptx import Presentation
         from pptx.util import Inches, Pt
@@ -506,6 +506,22 @@ def make_pptx(content, topic, style="klassik", ud={}):
                     p2.font.color.rgb = tx
                     p2.space_before = Pt(3)
                     p2.font.bold = False
+
+        # Foydalanuvchi rasmlarini qo'shish
+        if ud.get("img_pages") and UI.get(uid2):
+            img_pages = ud.get("img_pages", {})
+            slide_list = list(prs.slides)
+            for img_idx_str, page_num in img_pages.items():
+                img_idx = int(img_idx_str) if isinstance(img_idx_str, str) else img_idx_str
+                if img_idx < len(UI.get(uid2,[])) and page_num-1 < len(slide_list):
+                    try:
+                        sl2 = slide_list[page_num-1]
+                        img_path = UI[uid2][img_idx]
+                        from pptx.util import Inches
+                        sl2.shapes.add_picture(img_path,
+                            Inches(9), Inches(1.5), Inches(4), Inches(5.5))
+                    except Exception as ie:
+                        logger.error(f"Img insert: {ie}")
 
         td = tempfile.mkdtemp()
         out = os.path.join(td, "prezentatsiya.pptx")
@@ -791,16 +807,36 @@ def done_cmd(msg):
 @bot.message_handler(content_types=["photo"])
 def photo_h(msg):
     uid = msg.from_user.id
-    if gst(uid) != "img": return
-    UI.setdefault(uid, [])
-    ph = msg.photo[-1]; td = tempfile.mkdtemp()
+    state = gst(uid)
+    ph = msg.photo[-1]
+    td = tempfile.mkdtemp()
+
     try:
         fi = bot.get_file(ph.file_id); data = bot.download_file(fi.file_path)
-        p = os.path.join(td, f"i{len(UI[uid])}.jpg")
+        p = os.path.join(td, f"img_{uid}_{len(UI.get(uid,[]))}.jpg")
         with open(p,"wb") as f: f.write(data)
-        UI[uid].append(p)
-        bot.send_message(uid, f"✅ {len(UI[uid])} ta rasm. /done yozing.")
-    except Exception as e: logger.error(f"Photo:{e}")
+
+        # PDF/rasmlar uchun
+        if state == "img":
+            UI.setdefault(uid, []).append(p)
+            bot.send_message(uid, f"✅ {len(UI[uid])} ta rasm. /done yozing.")
+
+        # Prezentatsiya uchun rasm
+        elif state and state.startswith("wait_img_"):
+            UI.setdefault(uid, []).append(p)
+            # Qaysi betga qo'yish so'rash
+            page_kb = types.InlineKeyboardMarkup(row_width=4)
+            btns = [types.InlineKeyboardButton(str(i), callback_data=f"img_page:{i}:{len(UI[uid])-1}")
+                    for i in range(1, 11)]
+            page_kb.add(*btns)
+            page_kb.add(types.InlineKeyboardButton("✅ Davom etish", callback_data="img_done"))
+            bot.send_message(uid,
+                f"🖼 Rasm qabul qilindi!\nQaysi betga qo'ymoqchisiz?",
+                reply_markup=page_kb)
+        else:
+            bot.send_message(uid, "❌ Hozir rasm kutilmayapti.")
+    except Exception as e:
+        logger.error(f"Photo:{e}")
 
 @bot.message_handler(content_types=["document"])
 def doc_h(msg):
@@ -885,29 +921,49 @@ def text_h(msg):
         log_act(uid,"imlo"); cst(uid); bot.send_message(uid, "✅", reply_markup=main_kb(uid)); return
 
     # Shaxsiy ma'lumotlar
-    INFO_FIELDS = {
-        "ask_name":     ("full_name",   "🏛 Universitetingiz nomini kiriting:"),
-        "ask_univ":     ("university",  "📚 Fakultetingiz:"),
-        "ask_faculty":  ("faculty",     "📅 Kurs (masalan: 2-kurs):"),
-        "ask_year":     ("year",        "👩‍🏫 O'qituvchi ismi (ixtiyoriy, skip uchun '-'):"),
-        "ask_teacher":  ("teacher",     "🏙 Shahar (ixtiyoriy, skip uchun '-'):"),
-        "ask_city":     ("city",        None),
-    }
-    if state in INFO_FIELDS:
-        field, next_question = INFO_FIELDS[state]
+    INFO_STEPS = [
+        ("ask_name",    "full_name",   "👤 Ism va familiyangizni kiriting:", True),
+        ("ask_univ",    "university",  "🏛 Universitetingiz nomi:", True),
+        ("ask_faculty", "faculty",     "📚 Fakultetingiz:", False),
+        ("ask_year",    "year",        "📅 Nechinchi kurs? (masalan: 2-kurs):", False),
+        ("ask_teacher", "teacher",     "👩‍🏫 O'qituvchi ism-familyasi:", False),
+        ("ask_city",    "city",        "🏙 Shahar:", False),
+    ]
+    INFO_STATES = [s[0] for s in INFO_STEPS]
+
+    if state in INFO_STATES:
+        idx = INFO_STATES.index(state)
+        _, field, _, required = INFO_STEPS[idx]
         val = text.strip()
-        if val != "-": UD.setdefault(uid, {})[field] = val
-        next_states = list(INFO_FIELDS.keys())
-        idx = next_states.index(state)
-        if idx < len(next_states) - 1:
-            next_state = next_states[idx + 1]
+        if val: UD.setdefault(uid, {})[field] = val
+
+        # Keyingi qadam
+        if idx < len(INFO_STEPS) - 1:
+            next_state, _, next_q, next_req = INFO_STEPS[idx + 1]
             sst(uid, next_state)
-            bot.send_message(uid, next_question, reply_markup=bk_kb())
+            skip_text = "" if next_req else " (ixtiyoriy)"
+            skip_kb = types.InlineKeyboardMarkup(row_width=2)
+            skip_kb.add(
+                types.InlineKeyboardButton("⏭ O'tkazib yuborish", callback_data=f"skip:{next_state}"),
+                types.InlineKeyboardButton("🔙 Orqaga", callback_data="bk")
+            )
+            bot.send_message(uid, f"{next_q}{skip_text}", reply_markup=skip_kb if not next_req else bk_kb())
         else:
-            # Barcha ma'lumotlar to'landi — til tanlash
+            # Tugadi - shablon tanlash
             svc = ud.get("svc","referat")
-            sst(uid, f"{svc}_lang")
-            bot.send_message(uid, "🌐 Qaysi tilda?", reply_markup=lc_kb(f"{svc}_lang"))
+            if svc == "prez":
+                sst(uid, "prez_template")
+                template_kb = types.InlineKeyboardMarkup(row_width=2)
+                template_kb.add(
+                    types.InlineKeyboardButton("🎓 Akademik", callback_data="tmpl:akademik"),
+                    types.InlineKeyboardButton("💼 Biznes", callback_data="tmpl:biznes"),
+                    types.InlineKeyboardButton("🎨 Kreativ", callback_data="tmpl:kreativ"),
+                    types.InlineKeyboardButton("📊 Ilmiy", callback_data="tmpl:ilmiy"),
+                )
+                bot.send_message(uid, "📋 Prezentatsiya shablonini tanlang:", reply_markup=template_kb)
+            else:
+                sst(uid, f"{svc}_lang")
+                bot.send_message(uid, "🌐 Qaysi tilda?", reply_markup=lc_kb(f"{svc}_lang"))
         return
 
     # Mavzu kiritish
@@ -964,20 +1020,21 @@ def text_h(msg):
         bal = get_balance(uid)
         if bal < total:
             bot.send_message(uid,
-                f"❌ *Hisobingizda mablag' yetarli emas!*\n\n"
-                f"💰 Kerakli: {total:,} so'm\n"
-                f"💳 Balans: {bal:,} so'm\n\n"
-                f"Hisobni to'ldiring: /pay", parse_mode="Markdown"); return
+                f"❌ Hisobingizda mablag' yetarli emas!\n\n"
+                f"Kerakli: {total:,} so'm\n"
+                f"Balans: {bal:,} so'm\n\n"
+                f"Balansni to'ldirish uchun: /pay"); return
         UD.setdefault(uid,{}).update({"count":count,"total":total})
-        topic = ud.get("topic","")
-        deduct_balance(uid, total)
-        pm = bot.send_message(uid, f"⏳ {count} ta savol yaratilmoqda... ({total:,} so'm)")
-        res = gen_test(topic, count, get_lang(uid))
-        try: bot.delete_message(uid, pm.message_id)
-        except: pass
-        for i in range(0, len(res), 4000): bot.send_message(uid, res[i:i+4000])
-        log_act(uid,"test",topic,total); cst(uid)
-        bot.send_message(uid, f"✅ Tayyor! Balans: {get_balance(uid):,} so'm", reply_markup=main_kb(uid)); return
+        # Format tanlash
+        fmt_kb2 = types.InlineKeyboardMarkup(row_width=3)
+        fmt_kb2.add(
+            types.InlineKeyboardButton("📱 Matn", callback_data="test_fmt:txt"),
+            types.InlineKeyboardButton("📝 DOCX", callback_data="test_fmt:docx"),
+            types.InlineKeyboardButton("📄 PDF", callback_data="test_fmt:pdf"),
+        )
+        bot.send_message(uid,
+            f"✅ {count} ta savol x {PRICE_TEST:,} = {total:,} so'm\n\n"
+            f"Qaysi formatda olmoqchisiz?", reply_markup=fmt_kb2); return
 
     # Menyu tugmalari
     MENU = {
@@ -1089,10 +1146,15 @@ def cb_h(call):
         if d.startswith("st:"):
             style = d[3:]
             UD.setdefault(uid,{})["style"] = style
-            sst(uid, "prez_fmt_wait")
-            bot.edit_message_text("📁 Qaysi formatda olmoqchisiz?",
-                uid, call.message.message_id,
-                reply_markup=fmt_kb(uid, "prez_fmt"))
+            img_kb = types.InlineKeyboardMarkup(row_width=1)
+            img_kb.add(
+                types.InlineKeyboardButton("🖼 O'zim rasm yuklaydi", callback_data="img_choice:user"),
+                types.InlineKeyboardButton("🤖 Bot avtomatik rasm qo'ysin", callback_data="img_choice:auto"),
+                types.InlineKeyboardButton("❌ Rasmsiz davom etish", callback_data="img_choice:no"),
+            )
+            bot.edit_message_text(
+                "🖼 Prezentatsiyaga rasm qo'shmoqchimisiz?",
+                uid, call.message.message_id, reply_markup=img_kb)
 
     elif d.startswith("fmt:") or d.startswith("prez_fmt:"):
         fmt = d.split(":")[1]
@@ -1183,6 +1245,25 @@ def cb_h(call):
 
     elif d == "tr:l": sst(uid,"l2k"); bot.edit_message_text("✏️ Matn yuboring:", uid, call.message.message_id, reply_markup=bk_kb())
     elif d == "tr:k": sst(uid,"k2l"); bot.edit_message_text("✏️ Matn yuboring:", uid, call.message.message_id, reply_markup=bk_kb())
+
+    # Rasmni qaysi betga qo'yish
+    elif d.startswith("img_page:"):
+        parts = d.split(":"); page = int(parts[1]); img_idx = int(parts[2])
+        if "img_pages" not in UD.get(uid,{}):
+            UD.setdefault(uid,{})["img_pages"] = {}
+        UD[uid]["img_pages"][img_idx] = page
+        bot.edit_message_text(
+            f"✅ Rasm {page}-betga qo'yiladi!\nYana rasm yuboring yoki davom eting:",
+            uid, call.message.message_id,
+            reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("✅ Davom etish", callback_data="img_done")
+            ))
+
+    elif d == "img_done":
+        svc = ud.get("svc","prez")
+        sst(uid, f"{svc}_lang")
+        bot.edit_message_text("🌐 Qaysi tilda?", uid, call.message.message_id,
+            reply_markup=lc_kb(f"{svc}_lang"))
 
 if __name__ == "__main__":
     init_db()
