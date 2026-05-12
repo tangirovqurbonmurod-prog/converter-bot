@@ -545,10 +545,13 @@ def lang_kb():
     return kb
 
 def main_kb(uid):
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row(tx(uid,"ai_btn"), tx(uid,"conv_btn"))
-    kb.row(tx(uid,"tools_btn"), tx(uid,"donate_btn"))
-    kb.row(tx(uid,"help_btn"), tx(uid,"admin_btn"))
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    kb.row("📄 Referat", "📝 Kurs ishi")
+    kb.row("📋 Mustaqil ish", "📰 Maqola")
+    kb.row("📊 Prezentatsiya", "✅ Test")
+    kb.row("✏️ Imlo tuzatish", "🔄 Konvertatsiya")
+    kb.row("🛠 Qo\'shimcha", "💝 Donat")
+    kb.row("❓ Yordam", "👨\u200d💼 Admin")
     return kb
 
 def ai_kb(uid):
@@ -768,23 +771,26 @@ def text_h(msg):
         bot.send_message(uid, tx(uid,"main_menu"), reply_markup=main_kb(uid)); return
 
     # Menyu tugmalari
-    MENU_MAP = {
-        "ai_btn": lambda: bot.send_message(uid, tx(uid,"ai_menu"), parse_mode="Markdown", reply_markup=ai_kb(uid)),
-        "conv_btn": lambda: bot.send_message(uid, tx(uid,"conv_menu"), parse_mode="Markdown", reply_markup=conv_kb(uid)),
-        "tools_btn": lambda: bot.send_message(uid, tx(uid,"tools_menu"), parse_mode="Markdown", reply_markup=tools_kb(uid)),
-        "help_btn": lambda: bot.send_message(uid, tx(uid,"help_text",pp=PRICE_PAGE,kp=PRICE_KURS,mp2=PRICE_MUSTAQIL,mp=PRICE_MAQOLA,sp=PRICE_SLIDE,tp=PRICE_TEST), parse_mode="Markdown", reply_markup=main_kb(uid)),
-        "donate_btn": lambda: (lambda kb: bot.send_message(uid, tx(uid,"donate_text",card=DONATE_CARD,click=DONATE_CLICK), parse_mode="Markdown", reply_markup=kb))(
-            (lambda kb: (kb.add(types.InlineKeyboardButton(tx(uid,"donate_site"),url=DONATE_URL)), kb)[1])(types.InlineKeyboardMarkup())),
-        "admin_btn": lambda: (lambda kb: bot.send_message(uid, tx(uid,"admin_text"), parse_mode="Markdown", reply_markup=kb))(
-            (lambda kb: (kb.add(types.InlineKeyboardButton(tx(uid,"contact"),url=f"https://t.me/{ADMIN_USERNAME.lstrip('@')}")), kb)[1])(types.InlineKeyboardMarkup())),
-    }
-    for key, fn in MENU_MAP.items():
-        langs_vals = ["uz","ru","en"]
-        for l in langs_vals:
-            if text == {"uz":{"ai_btn":"AI Yordamchi","conv_btn":"Konvertatsiya","tools_btn":"Qo'shimcha","donate_btn":"Donat","help_btn":"Yordam","admin_btn":"Admin"},
-                        "ru":{"ai_btn":"AI Помощник","conv_btn":"Конвертация","tools_btn":"Инструменты","donate_btn":"Донат","help_btn":"Помощь","admin_btn":"Админ"},
-                        "en":{"ai_btn":"AI Assistant","conv_btn":"Conversion","tools_btn":"Tools","donate_btn":"Donate","help_btn":"Help","admin_btn":"Admin"}}.get(l,{}).get(key,""):
-                fn(); return
+    # Direct menu buttons
+    if text == "📄 Referat": sst(uid,"referat_t"); bot.send_message(uid, "📄 Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
+    if text == "📝 Kurs ishi": sst(uid,"kurs_t"); bot.send_message(uid, "📝 Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
+    if text == "📋 Mustaqil ish": sst(uid,"mustaqil_t"); bot.send_message(uid, "📋 Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
+    if text == "📰 Maqola": sst(uid,"maqola_t"); bot.send_message(uid, "📰 Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
+    if text == "📊 Prezentatsiya": sst(uid,"prez_t"); bot.send_message(uid, "📊 Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
+    if text == "✅ Test": sst(uid,"test_t"); bot.send_message(uid, "✅ Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
+    if text == "✏️ Imlo tuzatish": sst(uid,"imlo_t"); bot.send_message(uid, "✏️ Matn yoki fayl yuboring:", reply_markup=bk_kb(uid)); return
+    if text == "🔄 Konvertatsiya": bot.send_message(uid, "🔄 Format tanlang:", reply_markup=conv_kb(uid)); return
+    if text == "🛠 Qo'shimcha": bot.send_message(uid, "🛠 Vosita tanlang:", reply_markup=tools_kb(uid)); return
+    if text == "❓ Yordam":
+        bot.send_message(uid, tx(uid,"help_text",pp=PRICE_PAGE,kp=PRICE_KURS,mp2=PRICE_MUSTAQIL,mp=PRICE_MAQOLA,sp=PRICE_SLIDE,tp=PRICE_TEST), parse_mode="Markdown", reply_markup=main_kb(uid)); return
+    if text == "💝 Donat":
+        dk = types.InlineKeyboardMarkup()
+        dk.add(types.InlineKeyboardButton(tx(uid,"donate_site"), url=DONATE_URL))
+        bot.send_message(uid, tx(uid,"donate_text",card=DONATE_CARD,click=DONATE_CLICK), parse_mode="Markdown", reply_markup=dk); return
+    if text in ("👨‍💼 Admin", "👨\u200d💼 Admin"):
+        ak = types.InlineKeyboardMarkup()
+        ak.add(types.InlineKeyboardButton(tx(uid,"contact"), url=f"https://t.me/{ADMIN_USERNAME.lstrip('@')}"))
+        bot.send_message(uid, tx(uid,"admin_text"), parse_mode="Markdown", reply_markup=ak); return
 
 @bot.callback_query_handler(func=lambda c: True)
 def cb_h(call):
