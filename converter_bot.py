@@ -5,17 +5,15 @@ from datetime import datetime
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8270798642:AAGtdwHVgu0rKCwTU5x9eLLWWYGoWhG-j6I")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "1113404703"))
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "@abdurakhmon02")
-DONATE_URL = os.environ.get("DONATE_URL", "https://click.uz")
-DONATE_CARD = os.environ.get("DONATE_CARD", "9860 0609 2665 0809")
-DONATE_CLICK = os.environ.get("DONATE_CLICK", "+998 94 975 03 04")
+MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://t.me/your_bot/app")  # Mini App URL ni shu yerga kiriting
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
-PRICE_PAGE = 500       # Referat
-PRICE_KURS = 700       # Kurs ishi
-PRICE_MUSTAQIL = 400   # Mustaqil ish
-PRICE_MAQOLA = 600     # Maqola
-PRICE_SLIDE = 300      # Prezentatsiya
-PRICE_TEST = 200       # Test
+PRICE_PAGE     = int(os.environ.get("PRICE_PAGE",     "500"))   # Referat
+PRICE_KURS     = int(os.environ.get("PRICE_KURS",     "700"))   # Kurs ishi
+PRICE_MUSTAQIL = int(os.environ.get("PRICE_MUSTAQIL", "400"))   # Mustaqil ish
+PRICE_MAQOLA   = int(os.environ.get("PRICE_MAQOLA",   "600"))   # Maqola
+PRICE_SLIDE    = int(os.environ.get("PRICE_SLIDE",    "300"))   # Prezentatsiya
+PRICE_TEST     = int(os.environ.get("PRICE_TEST",     "200"))   # Test
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -550,7 +548,7 @@ def main_kb(uid):
     kb.row("📋 Mustaqil ish", "📰 Maqola")
     kb.row("📊 Prezentatsiya", "✅ Test")
     kb.row("✏️ Imlo tuzatish", "🔄 Konvertatsiya")
-    kb.row("🛠 Qo\'shimcha", "💝 Donat")
+    kb.row("🛠 Qo\'shimcha", "🌐 Mini App")
     kb.row("❓ Yordam", "👨\u200d💼 Admin")
     return kb
 
@@ -668,7 +666,7 @@ def doc_h(msg):
         inp = os.path.join(td, d.file_name or "f")
         with open(inp,"wb") as f: f.write(data)
 
-        if state == "imlo_f":
+        if state in ("imlo_t", "imlo_f"):
             pm = bot.send_message(uid, tx(uid,"processing2"))
             text = ""
             if fname.endswith(".txt"):
@@ -778,15 +776,16 @@ def text_h(msg):
     if text == "📰 Maqola": sst(uid,"maqola_t"); bot.send_message(uid, "📰 Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
     if text == "📊 Prezentatsiya": sst(uid,"prez_t"); bot.send_message(uid, "📊 Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
     if text == "✅ Test": sst(uid,"test_t"); bot.send_message(uid, "✅ Mavzuni kiriting:", reply_markup=bk_kb(uid)); return
-    if text == "✏️ Imlo tuzatish": sst(uid,"imlo_t"); bot.send_message(uid, "✏️ Matn yoki fayl yuboring:", reply_markup=bk_kb(uid)); return
+    if text == "✏️ Imlo tuzatish": sst(uid,"imlo_t"); bot.send_message(uid, "✏️ Matn yuboring yoki fayl yuklang (PDF/TXT):", reply_markup=bk_kb(uid)); return
     if text == "🔄 Konvertatsiya": bot.send_message(uid, "🔄 Format tanlang:", reply_markup=conv_kb(uid)); return
     if text == "🛠 Qo'shimcha": bot.send_message(uid, "🛠 Vosita tanlang:", reply_markup=tools_kb(uid)); return
     if text == "❓ Yordam":
         bot.send_message(uid, tx(uid,"help_text",pp=PRICE_PAGE,kp=PRICE_KURS,mp2=PRICE_MUSTAQIL,mp=PRICE_MAQOLA,sp=PRICE_SLIDE,tp=PRICE_TEST), parse_mode="Markdown", reply_markup=main_kb(uid)); return
-    if text == "💝 Donat":
-        dk = types.InlineKeyboardMarkup()
-        dk.add(types.InlineKeyboardButton(tx(uid,"donate_site"), url=DONATE_URL))
-        bot.send_message(uid, tx(uid,"donate_text",card=DONATE_CARD,click=DONATE_CLICK), parse_mode="Markdown", reply_markup=dk); return
+    if text == "🌐 Mini App":
+        mk = types.InlineKeyboardMarkup()
+        mk.add(types.InlineKeyboardButton("🌐 Mini Ilovani ochish", web_app=types.WebAppInfo(url=MINI_APP_URL)))
+        bot.send_message(uid, "📱 *EduBot Mini Ilova*\n\nQuyidagi tugmani bosing va to'liq imkoniyatlardan foydalaning!", parse_mode="Markdown", reply_markup=mk)
+        return
     if text in ("👨‍💼 Admin", "👨\u200d💼 Admin"):
         ak = types.InlineKeyboardMarkup()
         ak.add(types.InlineKeyboardButton(tx(uid,"contact"), url=f"https://t.me/{ADMIN_USERNAME.lstrip('@')}"))
