@@ -25,8 +25,41 @@ LN={"uz":"o'zbek","ru":"rus","en":"ingliz"}
 def init_db():
     c=sqlite3.connect("edubot.db"); cur=c.cursor()
     cur.execute("""CREATE TABLE IF NOT EXISTS users(telegram_id INTEGER PRIMARY KEY,username TEXT,first_name TEXT,lang TEXT DEFAULT 'uz',balance INTEGER DEFAULT 0,joined_at TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS orders(telegram_id INTEGER PRIMARY KEY,state TEXT,data TEXT,updated_at TEXT)""")
     cur.execute("""CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,telegram_id INTEGER,action TEXT,detail TEXT,income INTEGER DEFAULT 0,created_at TEXT)""")
     c.commit(); c.close()
+
+def save_order(uid, state, data):
+    import json
+    try:
+        c=sqlite3.connect("edubot.db"); cur=c.cursor()
+        cur.execute("INSERT OR REPLACE INTO orders VALUES(?,?,?,?)",
+            (uid,state,json.dumps(data,ensure_ascii=False),datetime.now().strftime("%d.%m.%Y %H:%M")))
+        c.commit(); c.close()
+    except: pass
+
+def load_order(uid):
+    import json
+    try:
+        c=sqlite3.connect("edubot.db"); cur=c.cursor()
+        cur.execute("SELECT state,data FROM orders WHERE telegram_id=?",(uid,))
+        row=cur.fetchone(); c.close()
+        if row: return row[0], json.loads(row[1])
+    except: pass
+    return None, {}
+
+def clear_order(uid):
+    try:
+        c=sqlite3.connect("edubot.db"); cur=c.cursor()
+        cur.execute("DELETE FROM orders WHERE telegram_id=?",(uid,))
+        c.commit(); c.close()
+    except: pass
+
+def restore_order(uid):
+    state,data=load_order(uid)
+    if state and data:
+        ST[uid]=state; UD[uid]=data; return True
+    return False
 
 def get_user(uid):
     c=sqlite3.connect("edubot.db"); cur=c.cursor()
@@ -100,11 +133,12 @@ def gen_text(svc,topic,pages,lang,ud={}):
     }
     struct=structs.get(svc,structs["referat"])
     names={"referat":"referat","kurs":"kurs ishi","mustaqil":"mustaqil ish","maqola":"ilmiy maqola"}
-    return claude(
+    res=claude(
         f"Mavzu: {topic}\nHajm: {pages} bet ({pages*wpg}+ so'z)\n{info}\n\n"
         f"{ln} tilida TO'LIQ {names.get(svc,'hujjat')} yozing:\n{struct}\n\n"
         "MUHIM: Har bo'limni to'liq, faktlar va misollar bilan yoz. Qisqartirma!",
         f"Professional {ln} akademik yozuvchi. To'liq, ilmiy, imlo xatosiz.",4000)
+    return clean_ai_text(res)
 
 TEMPLATES={
     "1":{"name":"🔵 Klassik Ko'k","bg1":(30,87,179),"bg2":(0,150,255),"title":(255,255,255),"text":(220,235,255),"accent":(255,200,0)},
@@ -167,11 +201,22 @@ def gen_prez_content(topic, slides, tmpl_name, lang, ud={}):
 
 def gen_test_content(topic, count, lang):
     ln=LN.get(lang,"o'zbek")
-    return claude(
+    import re as re2
+    res=claude(
         f"Mavzu: {topic}\nSavollar: {count}\nTil: {ln}\n\n"
         f"{count} ta test savoli:\nN. [Savol]\nA) ..\nB) ..\nC) ..\nD) ..\nTo'g'ri javob: [harf]\n\n"
         f"Darajalar: {count//3} oson, {count//3} o'rta, {count-2*(count//3)} qiyin",
         f"Professional {ln} test yaratuvchi.",min(count*85,4000))
+    res=re2.sub(r'\*\*(.+?)\*\*',r'\1',res); res=re2.sub(r'\*(.+?)\*',r'\1',res)
+    return res
+
+def clean_ai_text(text):
+    import re
+    text = re.sub(r'\*\*(.+?)\*\*', r'\\1', text, flags=re.DOTALL)
+    text = re.sub(r'\*(.+?)\*', r'\\1', text)
+    text = re.sub(r'#{1,6}\s+', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 def fix_spell(text, lang):
     ln=LN.get(lang,"o'zbek")
@@ -383,27 +428,69 @@ def make_pdf_simple(content, title, ud={}):
 
 def pdf2pptx(pdf,out):
     try:
-        import fitz; from pptx import Presentation; from pptx.util import Inches
+        import fitz
+        from pptx import Presentation
+        from pptx.util import Inches
         prs=Presentation(); prs.slide_width=Inches(10); prs.slide_height=Inches(7.5)
+        blank=prs.slide_layouts[6]
         doc=fitz.open(pdf)
         for page in doc:
-            pix=page.get_pixmap(matrix=fitz.Matrix(2,2))
-            sl=prs.slides.add_slide(prs.slide_layouts[6])
-            sl.shapes.add_picture(BytesIO(pix.tobytes("png")),0,0,prs.slide_width,prs.slide_height)
-        doc.close(); prs.save(out); return True
-    except Exception as e: logger.error(f"pdf2pptx:{e}"); return False
+            pix=page.get_pixmap(matrix=fitz.Matrix(1.5,1.5))
+            img_b=BytesIO(pix.tobytes("png"))
+            sl=prs.slides.add_slide(blank)
+            sl.shapes.add_picture(img_b,0,0,prs.slide_width,prs.slide_height)
+        doc.close(); prs.save(out)
+        logger.info(f"pdf2pptx OK: {out}")
+        return True
+    except Exception as e:
+        logger.error(f"pdf2pptx error: {e}")
+        return False
 
 def pptx2pdf(pptx,out):
+    """PPTX slaydlarni rasm orqali PDF ga aylantirish"""
     try:
-        from pptx import Presentation; from reportlab.pdfgen import canvas; from PIL import Image
-        prs=Presentation(pptx); w=float(prs.slide_width)/914400*72; h=float(prs.slide_height)/914400*72
-        c=canvas.Canvas(out,pagesize=(w,h))
-        for i in range(len(prs.slides)):
-            img=Image.new("RGB",(int(w*2),int(h*2)),"white")
-            td2=tempfile.mkdtemp(); tp=os.path.join(td2,f"s{i}.png")
-            img.save(tp); c.drawImage(tp,0,0,w,h); c.showPage(); shutil.rmtree(td2)
-        c.save(); return True
-    except Exception as e: logger.error(f"pptx2pdf:{e}"); return False
+        from pptx import Presentation
+        from pptx.util import Inches
+        from reportlab.pdfgen import canvas as rl_canvas
+        from PIL import Image, ImageDraw
+        
+        prs=Presentation(pptx)
+        w_pt=float(prs.slide_width)/914400*72
+        h_pt=float(prs.slide_height)/914400*72
+        px_w=int(float(prs.slide_width)/914400*120)
+        px_h=int(float(prs.slide_height)/914400*120)
+        
+        c=rl_canvas.Canvas(out,pagesize=(w_pt,h_pt))
+        td3=tempfile.mkdtemp()
+        
+        for i,slide in enumerate(prs.slides):
+            img=Image.new("RGB",(px_w,px_h),(255,255,255))
+            draw=ImageDraw.Draw(img)
+            
+            for shape in slide.shapes:
+                try:
+                    if shape.has_text_frame:
+                        left=max(0,int(shape.left/914400*120)) if shape.left else 10
+                        top=max(0,int(shape.top/914400*120)) if shape.top else 10
+                        for para in shape.text_frame.paragraphs:
+                            txt=" ".join(r.text for r in para.runs).strip()
+                            if txt:
+                                draw.text((left,top),txt[:80],fill=(0,0,0))
+                                top+=20
+                except: pass
+            
+            tp=os.path.join(td3,f"s{i}.png")
+            img.save(tp,"PNG")
+            c.drawImage(tp,0,0,w_pt,h_pt)
+            c.showPage()
+        
+        c.save()
+        shutil.rmtree(td3,ignore_errors=True)
+        logger.info(f"pptx2pdf OK: {len(prs.slides)} slides")
+        return True
+    except Exception as e:
+        logger.error(f"pptx2pdf error: {e}")
+        return False
 
 def imgs2pdf(imgs,out):
     try:
@@ -431,9 +518,13 @@ def k2l(t):
     return r
 
 ST,UD,UI={},{},{}
-def sst(uid,s,**kw): ST[uid]=s; UD.setdefault(uid,{}).update(kw)
+def sst(uid,s,**kw):
+    ST[uid]=s; UD.setdefault(uid,{}).update(kw)
+    try: save_order(uid,s,UD.get(uid,{}))
+    except: pass
 def gst(uid): return ST.get(uid)
-def cst(uid): ST.pop(uid,None)
+def cst(uid):
+    ST.pop(uid,None); clear_order(uid)
 
 INFO_STEPS=[
     ("ask_name","full_name","👤 Ism va familiyangizni kiriting:",True),
@@ -477,8 +568,9 @@ def main_kb(uid):
     kb.row("📋 Mustaqil ish","📰 Maqola")
     kb.row("📊 Prezentatsiya","✅ Test")
     kb.row("✏️ Imlo tuzatish","🔄 Konvertatsiya")
-    kb.row("💰 Balans","💝 Donat")
-    kb.row("❓ Yordam","👨‍💼 Admin")
+    kb.row("💰 Balans","📦 Buyurtmam")
+    kb.row("💝 Donat","❓ Yordam")
+    kb.row("🔤 Translit","👨‍💼 Admin")
     return kb
 def fmt_kb(prefix):
     kb=types.InlineKeyboardMarkup(row_width=3)
@@ -607,11 +699,26 @@ def doc_h(msg):
                     import fitz; d2=fitz.open(inp); txt=" ".join(pg.get_text() for pg in d2)
                 except: pass
             if txt:
-                fixed=fix_spell(txt,get_lang(uid))
-                bot.send_message(uid,f"✅ *Tuzatildi:*\n\n{fixed[:3500]}",parse_mode="Markdown")
-            else: bot.send_message(uid,"❌ Matn topilmadi.")
-            try: bot.delete_message(uid,pm.message_id)
-            except: pass
+                fixed=fix_spell(txt,get_lang(uid)); fc=clean_ai_text(fixed)
+                try: bot.delete_message(uid,pm.message_id)
+                except: pass
+                if fname.endswith(".pdf"):
+                    op,td3=make_pdf_simple(fc,"Tuzatilgan matn",{})
+                    if op:
+                        with open(op,"rb") as f2: bot.send_document(uid,f2,caption="✅ Imlo tuzatildi (PDF)")
+                        shutil.rmtree(td3,ignore_errors=True)
+                    else: bot.send_message(uid,f"✅ Tuzatildi:\n\n{fc[:3500]}")
+                elif fname.endswith(".docx"):
+                    op,td3=make_docx(fc,"Tuzatilgan matn",{})
+                    if op:
+                        with open(op,"rb") as f2: bot.send_document(uid,f2,caption="✅ Imlo tuzatildi (DOCX)")
+                        shutil.rmtree(td3,ignore_errors=True)
+                    else: bot.send_message(uid,f"✅ Tuzatildi:\n\n{fc[:3500]}")
+                else: bot.send_message(uid,f"✅ *Tuzatildi:*\n\n{fc[:3500]}",parse_mode="Markdown")
+            else:
+                try: bot.delete_message(uid,pm.message_id)
+                except: pass
+                bot.send_message(uid,"❌ Matn topilmadi.")
             cst(uid); bot.send_message(uid,"✅",reply_markup=main_kb(uid)); return
         pm=bot.send_message(uid,"⏳ Konvertatsiya..."); ok=False
         if fname.endswith(".pdf") and state=="pdf_pptx":
@@ -915,6 +1022,13 @@ def cb_h(call):
 
     elif d=="tr:l": sst(uid,"l2k"); bot.edit_message_text("✏️ Matn yuboring:",uid,call.message.message_id,reply_markup=bk_kb())
     elif d=="tr:k": sst(uid,"k2l"); bot.edit_message_text("✏️ Matn yuboring:",uid,call.message.message_id,reply_markup=bk_kb())
+
+    elif d.startswith("resume:"):
+        st2=d[7:]; svc=UD.get(uid,{}).get("svc","")
+        if "tmpl" in st2 or st2=="prez_tmpl": show_templates(uid,1)
+        elif "lang" in st2:
+            bot.send_message(uid,"🌐 Qaysi tilda?",reply_markup=lc_kb(f"{svc}_lang"))
+        else: bot.send_message(uid,"📋 Asosiy menyu:",reply_markup=main_kb(uid))
 
 if __name__=="__main__":
     init_db()
