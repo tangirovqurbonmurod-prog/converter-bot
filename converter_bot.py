@@ -185,25 +185,67 @@ TEMPLATES={
     "42":{"name":"🌊 To'lqin","bg1":(0,50,100),"bg2":(0,130,200),"title":(255,255,255),"text":(200,230,255),"accent":(100,255,255)},
 }
 
-def get_unsplash_image(query):
-    """Unsplash API orqali bepul rasm topish"""
+def create_slide_image(topic, slide_title, tmpl_id="1"):
+    """PIL bilan mavzuga mos chiroyli rasm yaratish"""
     try:
-        # Unsplash Source - API key shart emas
-        clean_q=query.replace(" ","+")[:50]
-        # Bir nechta variant sinab ko'ramiz
-        urls=[
-            f"https://source.unsplash.com/800x600/?{clean_q}",
-            f"https://source.unsplash.com/featured/?{clean_q}",
-        ]
-        for url in urls:
-            try:
-                r=requests.get(url,timeout=10,allow_redirects=True)
-                if r.status_code==200 and len(r.content)>5000:
-                    return url
-            except: continue
-        return None
+        from PIL import Image, ImageDraw
+        tmpl=TEMPLATES.get(str(tmpl_id),TEMPLATES["1"])
+        c1=tmpl["bg1"]; c2=tmpl["bg2"]; acc=tmpl["accent"]
+        
+        w,h=800,500
+        img=Image.new("RGB",(w,h),c1)
+        draw=ImageDraw.Draw(img)
+        
+        # Gradient
+        for y in range(h):
+            ratio=y/h
+            r=int(c1[0]*(1-ratio)+c2[0]*ratio)
+            g=int(c1[1]*(1-ratio)+c2[1]*ratio)
+            b=int(c1[2]*(1-ratio)+c2[2]*ratio)
+            draw.line([(0,y),(w,y)],fill=(r,g,b))
+        
+        # Dekorativ shakllar
+        draw.ellipse([w-180,-80,w+80,180],fill=(*acc,60))
+        draw.ellipse([-80,h-180,180,h+80],fill=(*acc,40))
+        draw.ellipse([w//2-60,h//2-60,w//2+60,h//2+60],
+                     fill=(255,255,255,15))
+        
+        # Accent chiziq
+        draw.rectangle([0,0,w,6],fill=acc)
+        draw.rectangle([0,h-6,w,h],fill=acc)
+        
+        # Matn - slide_title
+        title_short=slide_title[:35]
+        # Matn markazda
+        try:
+            # Oddiy shrift ishlatamiz
+            from PIL import ImageFont
+            # Default PIL shrift
+            font_big=ImageFont.load_default()
+        except: pass
+        
+        # Matn yozing
+        txt_color=tmpl["title"]
+        draw.text((w//2, h//2-40), title_short, 
+                  fill=txt_color, anchor="mm")
+        topic_short=topic[:40]
+        draw.text((w//2, h//2+20), topic_short,
+                  fill=tmpl["text"], anchor="mm")
+        
+        # Gorizontal chiziq
+        draw.rectangle([w//4, h//2-5, 3*w//4, h//2-2], fill=acc)
+        
+        buf=BytesIO()
+        img.save(buf,"PNG")
+        buf.seek(0)
+        return buf
     except Exception as e:
-        logger.error(f"Unsplash: {e}"); return None
+        logger.error(f"create_slide_image: {e}")
+        return None
+
+def get_unsplash_image(query):
+    """Endi create_slide_image ishlatiladi"""
+    return None
 
 def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
     ln=LN.get(lang,"o'zbek"); info=build_info(ud)
@@ -221,7 +263,7 @@ def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
         "2. Hech qanday **, ##, * belgisi ISHLATMA\n"
         "3. Har slaydda aniq faktlar, raqamlar, misollar\n"
         f"4. SLAYD 1: {topic} - sarlavha slayd (muallif, universitet, sana)\n"
-        f"5. SLAYD 2: REJALAR (mundarija emas!) - {plans_count} ta bo'lim ro'yxati\n"
+        f"5. SLAYD 2: REJALAR (majburiy! sarlavha aynan 'REJALAR' bo'lsin) - {plans_count} ta bo'lim ro'yxati, har biri raqamlangan\n"
         f"6. SLAYD 3-{slides-1}: Asosiy mazmun - har reja {slides_per_plan} ta slayd\n"
         f"7. SLAYD {slides}: Xulosa va savollar\n\n"
         f"Barcha {slides} ta slaydni to'liq yoz! 2-slayd nomi REJALAR bo'lsin!",
@@ -320,6 +362,33 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
                 tf3.paragraphs[0].font.size=Pt(16); tf3.paragraphs[0].font.color.rgb=acc
                 tf3.paragraphs[0].alignment=PP_ALIGN.CENTER
             except: pass
+        elif sn==1 and ("REJA" in title.upper() or "PLAN" in title.upper() or "MUNDARIJA" in title.upper()):
+            # 2-SLAYD: REJALAR - markazda katta, chiroyli
+            # Sarlavha "REJALAR"
+            tb=sl.shapes.add_textbox(Inches(0.5),Inches(0.2),Inches(12.33),Inches(1.1))
+            tf=tb.text_frame; tf.word_wrap=True
+            p=tf.paragraphs[0]; p.text="📋  REJALAR"
+            p.font.size=Pt(36); p.font.bold=True; p.font.color.rgb=tc
+            p.alignment=PP_ALIGN.CENTER
+            # Chiziq
+            try:
+                ln2=sl.shapes.add_shape(1,Inches(2),Inches(1.4),Inches(9.33),Inches(0.07))
+                ln2.fill.solid(); ln2.fill.fore_color.rgb=acc; ln2.line.fill.background()
+            except: pass
+            # Rejalar markazda
+            if bullets:
+                tb2=sl.shapes.add_textbox(Inches(1.5),Inches(1.6),Inches(10.33),Inches(5.6))
+                tf2=tb2.text_frame; tf2.word_wrap=True
+                first=True
+                for bi,b in enumerate(bullets[:12]):
+                    b=b.strip()
+                    if not b: continue
+                    p2=tf2.paragraphs[0] if first else tf2.add_paragraph()
+                    first=False
+                    p2.text=f"  {bi+1}.  {b}"
+                    p2.font.size=Pt(22); p2.font.bold=False
+                    p2.font.color.rgb=txc; p2.space_before=Pt(8)
+                    p2.alignment=PP_ALIGN.LEFT
         else:
             tb=sl.shapes.add_textbox(Inches(0.4),Inches(0.2),Inches(12.53),Inches(1.2))
             tf=tb.text_frame; tf.word_wrap=True
@@ -344,39 +413,45 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
                 rq.text_frame.paragraphs[0].text=str(sn+1)
                 rq.text_frame.paragraphs[0].font.size=Pt(11); rq.text_frame.paragraphs[0].font.color.rgb=acc
             except: pass
+        # Foydalanuvchi rasmini qo'yish
         if user_imgs and img_pages:
             for ii,pn in img_pages.items():
                 try:
-                    ii=int(ii)
-                    if ii<len(user_imgs) and pn==sn+1:
-                        sl.shapes.add_picture(user_imgs[ii],Inches(9.2),Inches(1.7),Inches(3.8),Inches(5.0))
-                except Exception as e: logger.error(f"Img:{e}")
-    # AI rasm qo'yish (tanlangan slaydlarga)
+                    ii_int=int(ii) if isinstance(ii,str) else ii
+                    if ii_int<len(user_imgs) and pn==sn+1:
+                        img_path=user_imgs[ii_int]
+                        sl.shapes.add_picture(
+                            img_path,
+                            Inches(8.8),Inches(1.6),
+                            Inches(4.2),Inches(5.4))
+                        logger.info(f"User img added: slide {sn+1}")
+                except Exception as e: logger.error(f"User img:{e}")
+    # AI rasm qo'yish (tanlangan slaydlarga) - PIL bilan yaratilgan rasm
     ai_img_slides=ud.get("ai_img_slides",[])
+    tmpl_id_for_img=str(ud.get("template_id","1"))
     if ai_img_slides:
-        try:
-            slide_list=list(prs.slides)
-            for slide_num in ai_img_slides:
+        slide_list=list(prs.slides)
+        for slide_num in ai_img_slides:
+            try:
                 if slide_num-1 < len(slide_list):
                     sl2=slide_list[slide_num-1]
-                    # Unsplash API orqali bepul rasm olish
-                    img_url=get_unsplash_image(topic)
-                    if img_url:
-                        r=requests.get(img_url,timeout=15)
-                        if r.status_code==200:
-                            img_data=BytesIO(r.content)
-                            # Rasm o'lchamini tekshirish
-                            from PIL import Image as PILImg
-                            pil_img=PILImg.open(BytesIO(r.content))
-                            if pil_img.width>100 and pil_img.height>100:
-                                # O'ng tomonga qo'yish
-                                sl2.shapes.add_picture(
-                                    BytesIO(r.content),
-                                    Inches(8.8), Inches(1.6),
-                                    Inches(4.2), Inches(5.4))
-                                logger.info(f"AI img added to slide {slide_num}")
-        except Exception as ie:
-            logger.error(f"AI img error: {ie}")
+                    # O'sha slaydning sarlavhasini topish
+                    slide_title=topic
+                    for sh in sl2.shapes:
+                        if sh.has_text_frame and sh.text_frame.paragraphs:
+                            t=sh.text_frame.paragraphs[0].text.strip()
+                            if t and len(t)>2: slide_title=t; break
+                    # PIL bilan rasm yaratish
+                    img_buf=create_slide_image(topic,slide_title,tmpl_id_for_img)
+                    if img_buf:
+                        # Slaydning o'ng tomoniga qo'yish
+                        sl2.shapes.add_picture(
+                            img_buf,
+                            Inches(8.8), Inches(1.6),
+                            Inches(4.2), Inches(5.4))
+                        logger.info(f"AI img added to slide {slide_num}")
+            except Exception as ie:
+                logger.error(f"AI img slide {slide_num}: {ie}")
 
     td=tempfile.mkdtemp(); out=os.path.join(td,"prezentatsiya.pptx")
     prs.save(out); return out,td
@@ -582,7 +657,7 @@ def k2l(t):
         else: r+=t[i]; i+=1
     return r
 
-ST,UD,UI={},{},{}
+ST,UD,UI,HIST={},{},{},{}
 def sst(uid,s,**kw):
     ST[uid]=s; UD.setdefault(uid,{}).update(kw)
     try: save_order(uid,s,UD.get(uid,{}))
@@ -635,7 +710,7 @@ def main_kb(uid):
     kb.row("✏️ Imlo tuzatish","🔄 Konvertatsiya")
     kb.row("💰 Balans","📦 Buyurtmam")
     kb.row("💝 Donat","❓ Yordam")
-    kb.row("🔤 Translit","👨‍💼 Admin")
+    kb.add("👨‍💼 Admin")
     return kb
 def fmt_kb(prefix):
     kb=types.InlineKeyboardMarkup(row_width=3)
@@ -664,8 +739,8 @@ def lc_kb(prefix):
     return kb
 def bk_kb():
     kb=types.InlineKeyboardMarkup(row_width=2)
-    kb.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"),
-           types.InlineKeyboardButton("🔙 Orqaga",callback_data="bk"))
+    kb.add(types.InlineKeyboardButton("◀️ Orqaga",callback_data="back_step"),
+           types.InlineKeyboardButton("🏠 Menyu",callback_data="bk"))
     return kb
 
 def slides_count_kb():
@@ -980,6 +1055,45 @@ def cb_h(call):
     ud=UD.get(uid,{})
 
     if d=="noop": return
+
+    if d=="back_step":
+        # Oldingi bosqichga qaytish
+        prev=go_back(uid)
+        if prev:
+            STATE_MESSAGES={
+                "referat_t":"📄 Mavzuni kiriting:",
+                "kurs_t":"📝 Mavzuni kiriting:",
+                "mustaqil_t":"📋 Mavzuni kiriting:",
+                "maqola_t":"📰 Mavzuni kiriting:",
+                "prez_t":"📊 Mavzuni kiriting:",
+                "test_t":"✅ Mavzuni kiriting:",
+                "referat_p":f"📄 Necha bet? (5-50) | 1 bet = {PRICE_PAGE:,} so'm",
+                "kurs_p":f"📝 Necha bet? (5-50) | 1 bet = {PRICE_KURS:,} so'm",
+                "mustaqil_p":f"📋 Necha bet? (5-50) | 1 bet = {PRICE_MUSTAQIL:,} so'm",
+                "maqola_p":f"📰 Necha bet? (5-50) | 1 bet = {PRICE_MAQOLA:,} so'm",
+                "prez_sl":"📊 Necha slayd?",
+                "prez_plans":"📋 Nechta reja?",
+                "test_cnt":"🔢 Nechta savol?",
+                "ask_name":"👤 Ism va familiyangizni kiriting:",
+                "ask_univ":"🏛 Universitetingiz:",
+                "ask_faculty":"📚 Fakultetingiz:",
+                "ask_year":"📅 Nechinchi kurs?",
+                "ask_teacher":"👩‍🏫 O'qituvchi ismi:",
+                "ask_city":"🏙 Shahar:",
+                "prez_tmpl":"🎨 Shablon tanlang:",
+                "prez_lang":"🌐 Qaysi tilda?",
+            }
+            kb2=types.InlineKeyboardMarkup(row_width=2)
+            kb2.add(types.InlineKeyboardButton("◀️ Orqaga",callback_data="back_step"),
+                    types.InlineKeyboardButton("🏠 Menyu",callback_data="bk"))
+            msg=STATE_MESSAGES.get(prev,"Davom eting:")
+            try: bot.edit_message_text(msg,uid,call.message.message_id,reply_markup=kb2)
+            except: bot.send_message(uid,msg,reply_markup=kb2)
+        else:
+            try: bot.edit_message_text("📋 Asosiy menyu:",uid,call.message.message_id)
+            except: pass
+            bot.send_message(uid,"📋 Asosiy menyu:",reply_markup=main_kb(uid))
+        return
 
     if d.startswith("lang:"):
         lang=d[5:]; set_lang(uid,lang)
