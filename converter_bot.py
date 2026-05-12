@@ -185,29 +185,67 @@ TEMPLATES={
     "42":{"name":"🌊 To'lqin","bg1":(0,50,100),"bg2":(0,130,200),"title":(255,255,255),"text":(200,230,255),"accent":(100,255,255)},
 }
 
-def gen_prez_content(topic, slides, tmpl_name, lang, ud={}):
-    ln=LN.get(lang,"o'zbek"); info=build_info(ud)
-    return claude(
-        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nUslub: {tmpl_name}\n{info}\n\n"
-        "QATIY QOIDALAR:\n"
-        "1. FORMAT: SLAYD N: [Sarlavha]\n[Mazmun]\n\n"
-        "2. Hech qanday **, ##, * belgisi ISHLATMA\n"
-        "3. Har slaydda 5-8 ta aniq gap, faktlar, raqamlar\n"
-        f"4. SLAYD 1: {topic} - sarlavha, muallif, sana\n"
-        "5. SLAYD 2: Mundarija\n"
-        f"6. SLAYD {slides}: Xulosa va savollar\n\n"
-        f"Barcha {slides} ta slaydni to'liq yoz!",
-        f"Professional {ln} prezentatsiya yozuvchi. Markdown belgisiz, mazmunli.",4000)
+def get_unsplash_image(query):
+    """Unsplash API orqali bepul rasm topish"""
+    try:
+        # Unsplash Source - API key shart emas
+        clean_q=query.replace(" ","+")[:50]
+        # Bir nechta variant sinab ko'ramiz
+        urls=[
+            f"https://source.unsplash.com/800x600/?{clean_q}",
+            f"https://source.unsplash.com/featured/?{clean_q}",
+        ]
+        for url in urls:
+            try:
+                r=requests.get(url,timeout=10,allow_redirects=True)
+                if r.status_code==200 and len(r.content)>5000:
+                    return url
+            except: continue
+        return None
+    except Exception as e:
+        logger.error(f"Unsplash: {e}"); return None
 
-def gen_test_content(topic, count, lang):
+def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
+    ln=LN.get(lang,"o'zbek"); info=build_info(ud)
+    # Reja sarlavhalarini hisoblash
+    content_slides=slides-3  # Sarlavha+Reja+Xulosa chiqarib
+    slides_per_plan=max(1,content_slides//plans_count)
+    
+    plan_str="\n".join([f"  {i+1}. [Reja {i+1} sarlavhasi]" for i in range(plans_count)])
+    
+    result=claude(
+        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nUslub: {tmpl_name}\n{info}\n"
+        f"Rejalar soni: {plans_count}\n\n"
+        "QATIY QOIDALAR:\n"
+        "1. FORMAT: SLAYD N: [Sarlavha]\n[Mazmun - 5-8 ta aniq gap]\n\n"
+        "2. Hech qanday **, ##, * belgisi ISHLATMA\n"
+        "3. Har slaydda aniq faktlar, raqamlar, misollar\n"
+        f"4. SLAYD 1: {topic} - sarlavha slayd (muallif, universitet, sana)\n"
+        f"5. SLAYD 2: REJALAR (mundarija emas!) - {plans_count} ta bo'lim ro'yxati\n"
+        f"6. SLAYD 3-{slides-1}: Asosiy mazmun - har reja {slides_per_plan} ta slayd\n"
+        f"7. SLAYD {slides}: Xulosa va savollar\n\n"
+        f"Barcha {slides} ta slaydni to'liq yoz! 2-slayd nomi REJALAR bo'lsin!",
+        f"Professional {ln} prezentatsiya mutaxassisi. Markdown belgisiz, mazmunli, faktlar bilan.",4000)
+    return clean_ai_text(result)
+
+def gen_test_content(topic, count, lang, with_img=False):
     ln=LN.get(lang,"o'zbek")
+    img_instruction="" if not with_img else (
+        "\n\nHar 5 ta savoldan keyin:\n"
+        "[RASM: mavzuga mos rasm tavsifi - 1 jumla]\n"
+        "Bu rasm keyingi savollar uchun asos bo'ladi.")
     import re as re2
     res=claude(
         f"Mavzu: {topic}\nSavollar: {count}\nTil: {ln}\n\n"
-        f"{count} ta test savoli:\nN. [Savol]\nA) ..\nB) ..\nC) ..\nD) ..\nTo'g'ri javob: [harf]\n\n"
-        f"Darajalar: {count//3} oson, {count//3} o'rta, {count-2*(count//3)} qiyin",
-        f"Professional {ln} test yaratuvchi.",min(count*85,4000))
-    res=re2.sub(r'\*\*(.+?)\*\*',r'\1',res); res=re2.sub(r'\*(.+?)\*',r'\1',res)
+        f"{count} ta professional test savoli:{img_instruction}\n\n"
+        f"FORMAT:\nN. [Aniq, bir ma'noli savol]\n"
+        "A) [javob]\nB) [javob]\nC) [javob]\nD) [javob]\n"
+        "To'g'ri javob: [harf]\n\n"
+        f"Darajalar: {count//3} oson, {count//3} o'rta, {count-2*(count//3)} qiyin\n"
+        "Har bir savol oldingi savoldan farq qilsin!",
+        f"Professional {ln} test yaratuvchi. Markdown belgisiz.",min(count*90,4000))
+    res=re2.sub(r'\*\*(.+?)\*\*',r'\1',res)
+    res=re2.sub(r'\*(.+?)\*',r'\1',res)
     return res
 
 def clean_ai_text(text):
@@ -313,6 +351,33 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
                     if ii<len(user_imgs) and pn==sn+1:
                         sl.shapes.add_picture(user_imgs[ii],Inches(9.2),Inches(1.7),Inches(3.8),Inches(5.0))
                 except Exception as e: logger.error(f"Img:{e}")
+    # AI rasm qo'yish (tanlangan slaydlarga)
+    ai_img_slides=ud.get("ai_img_slides",[])
+    if ai_img_slides:
+        try:
+            slide_list=list(prs.slides)
+            for slide_num in ai_img_slides:
+                if slide_num-1 < len(slide_list):
+                    sl2=slide_list[slide_num-1]
+                    # Unsplash API orqali bepul rasm olish
+                    img_url=get_unsplash_image(topic)
+                    if img_url:
+                        r=requests.get(img_url,timeout=15)
+                        if r.status_code==200:
+                            img_data=BytesIO(r.content)
+                            # Rasm o'lchamini tekshirish
+                            from PIL import Image as PILImg
+                            pil_img=PILImg.open(BytesIO(r.content))
+                            if pil_img.width>100 and pil_img.height>100:
+                                # O'ng tomonga qo'yish
+                                sl2.shapes.add_picture(
+                                    BytesIO(r.content),
+                                    Inches(8.8), Inches(1.6),
+                                    Inches(4.2), Inches(5.4))
+                                logger.info(f"AI img added to slide {slide_num}")
+        except Exception as ie:
+            logger.error(f"AI img error: {ie}")
+
     td=tempfile.mkdtemp(); out=os.path.join(td,"prezentatsiya.pptx")
     prs.save(out); return out,td
 
@@ -598,13 +663,58 @@ def lc_kb(prefix):
            types.InlineKeyboardButton("🇬🇧 Ingliz",callback_data=f"{prefix}:en"))
     return kb
 def bk_kb():
-    kb=types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🔙 Orqaga",callback_data="bk"))
+    kb=types.InlineKeyboardMarkup(row_width=2)
+    kb.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"),
+           types.InlineKeyboardButton("🔙 Orqaga",callback_data="bk"))
+    return kb
+
+def slides_count_kb():
+    """Prezentatsiya slayd soni tugmalari"""
+    kb=types.InlineKeyboardMarkup(row_width=3)
+    counts=[10,15,20,25,30,35,40,50]
+    btns=[types.InlineKeyboardButton(
+        f"{n} slayd\n{n*PRICE_SLIDE:,} so'm",
+        callback_data=f"slides:{n}") for n in counts]
+    kb.add(*btns)
+    kb.add(types.InlineKeyboardButton("✏️ O'zim yozaman",callback_data="slides:custom"))
+    kb.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
+    return kb
+
+def test_count_kb():
+    """Test savol soni tugmalari"""
+    kb=types.InlineKeyboardMarkup(row_width=3)
+    counts=[10,20,30,50,100,200,500,1000]
+    btns=[types.InlineKeyboardButton(
+        f"{n} ta\n{n*PRICE_TEST:,} so'm",
+        callback_data=f"tcount:{n}") for n in counts]
+    kb.add(*btns)
+    kb.add(types.InlineKeyboardButton("✏️ O'zim yozaman",callback_data="tcount:custom"))
+    kb.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
+    return kb
+
+def plans_count_kb():
+    """Reja soni tugmalari"""
+    kb=types.InlineKeyboardMarkup(row_width=4)
+    for n in [3,4,5,6,7,8,10,12]:
+        kb.add(types.InlineKeyboardButton(f"{n} ta reja",callback_data=f"plans:{n}"))
+    kb.add(types.InlineKeyboardButton("✏️ O'zim yozaman",callback_data="plans:custom"))
+    kb.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
+    return kb
+
+def prez_img_slide_kb(slide_count):
+    """Qaysi slaydga rasm qo'yish"""
+    kb=types.InlineKeyboardMarkup(row_width=5)
+    btns=[types.InlineKeyboardButton(str(i),callback_data=f"ipage:0:{i}") 
+          for i in range(1,min(slide_count+1,16))]
+    kb.add(*btns)
+    kb.add(types.InlineKeyboardButton("✅ Davom etish",callback_data="img_done"))
+    kb.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
     return kb
 def skip_kb(ns):
     kb=types.InlineKeyboardMarkup(row_width=2)
     kb.add(types.InlineKeyboardButton("⏭ O'tkazib yuborish",callback_data=f"skip:{ns}"),
            types.InlineKeyboardButton("🔙 Orqaga",callback_data="bk"))
+    kb.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
     return kb
 
 @bot.message_handler(commands=["start"])
@@ -775,8 +885,16 @@ def text_h(msg):
     TOPIC_MAP={"referat_t":"referat_p","kurs_t":"kurs_p","mustaqil_t":"mustaqil_p","maqola_t":"maqola_p","prez_t":"prez_sl","test_t":"test_cnt"}
     if state in TOPIC_MAP:
         UD.setdefault(uid,{})["topic"]=text; ns=TOPIC_MAP[state]; sst(uid,ns)
-        if ns=="prez_sl": bot.send_message(uid,f"🎯 Necha slayd? (5-50)\n💰 1 slayd = {PRICE_SLIDE:,} so'm",reply_markup=bk_kb())
-        elif ns=="test_cnt": bot.send_message(uid,f"🔢 Nechta savol? (10-1000)\n💰 1 savol = {PRICE_TEST:,} so'm",reply_markup=bk_kb())
+        if ns=="prez_sl":
+            bot.send_message(uid,
+                f"🎯 *Necha slayd kerak?*\n💰 1 slayd = {PRICE_SLIDE:,} so'm\n\n"
+                f"💡 Tanlang yoki raqam yozing:",
+                parse_mode="Markdown", reply_markup=slides_count_kb())
+        elif ns=="test_cnt":
+            bot.send_message(uid,
+                f"🔢 *Nechta savol kerak?*\n💰 1 savol = {PRICE_TEST:,} so'm\n\n"
+                f"💡 Tanlang yoki raqam yozing:",
+                parse_mode="Markdown", reply_markup=test_count_kb())
         else:
             prices={"referat_p":PRICE_PAGE,"kurs_p":PRICE_KURS,"mustaqil_p":PRICE_MUSTAQIL,"maqola_p":PRICE_MAQOLA}
             bot.send_message(uid,f"📄 Necha bet? (5-50)\n💰 1 bet = {prices.get(ns,PRICE_PAGE):,} so'm",reply_markup=bk_kb())
@@ -797,16 +915,37 @@ def text_h(msg):
         except: bot.send_message(uid,"❌ 5-50 orasida raqam kiriting"); return
         total=slides*PRICE_SLIDE
         UD.setdefault(uid,{}).update({"slides":slides,"svc":"prez","total":total})
+        sst(uid,"prez_plans")
+        bot.send_message(uid,
+            f"✅ {slides} slayd × {PRICE_SLIDE:,} = *{total:,} so'm*\n\n"
+            "📋 *Nechta reja (bo'lim) bo'lsin?*\n"
+            "(Har bir reja alohida bo'lim bo'ladi)",
+            parse_mode="Markdown", reply_markup=plans_count_kb()); return
+
+    if state=="prez_plans":
+        try: plans=max(2,min(15,int(text.strip())))
+        except: bot.send_message(uid,"❌ 2-15 orasida raqam kiriting"); return
+        UD.setdefault(uid,{})["plans_count"]=plans
         sst(uid,"ask_name")
-        bot.send_message(uid,f"✅ {slides} slayd × {PRICE_SLIDE:,} = *{total:,} so'm*\n\n👤 Ism va familiyangizni kiriting:",parse_mode="Markdown",reply_markup=bk_kb()); return
+        bot.send_message(uid,f"✅ {plans} ta reja.\n\n👤 Ism va familiyangizni kiriting:",reply_markup=bk_kb()); return
 
     if state=="test_cnt":
         try: count=max(10,min(1000,int(text.strip())))
         except: bot.send_message(uid,"❌ 10-1000 orasida raqam kiriting"); return
         total=count*PRICE_TEST; bal=get_balance(uid)
-        if bal<total: bot.send_message(uid,f"❌ Mablag' yetarli emas!\nKerakli: {total:,}\nBalans: {bal:,}\n\nBalans to'ldirish: /pay"); return
+        if bal<total: bot.send_message(uid,f"❌ Mablag' yetarli emas!\nKerakli: {total:,}\nBalans: {bal:,}\n\nBalans to'ldirish uchun adminga yozing."); return
         UD.setdefault(uid,{}).update({"count":count,"total":total})
-        bot.send_message(uid,f"📁 {count} ta savol × {PRICE_TEST:,} = *{total:,} so'm*\n\nQaysi formatda?",parse_mode="Markdown",reply_markup=fmt_kb("test_fmt")); return
+        # Rasmli test so'rash
+        img_test_kb=types.InlineKeyboardMarkup(row_width=2)
+        img_test_kb.add(
+            types.InlineKeyboardButton("🖼 Ha, rasmli test",callback_data="test_img:yes"),
+            types.InlineKeyboardButton("📝 Yo'q, oddiy test",callback_data="test_img:no"))
+        img_test_kb.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
+        bot.send_message(uid,
+            f"✅ {count} ta savol × {PRICE_TEST:,} = *{total:,} so'm*\n\n"
+            "🖼 Testda rasmlar ham bo'lsinmi?\n"
+            "(Rasmli test: grafik, jadval va rasmlar bilan)",
+            parse_mode="Markdown", reply_markup=img_test_kb); return
 
     MENU={"📄 Referat":("referat_t","referat"),"📝 Kurs ishi":("kurs_t","kurs"),"📋 Mustaqil ish":("mustaqil_t","mustaqil"),"📰 Maqola":("maqola_t","maqola"),"📊 Prezentatsiya":("prez_t","prez"),"✅ Test":("test_t","test")}
     if text in MENU:
@@ -891,17 +1030,30 @@ def cb_h(call):
         tmpl_id=d[5:]; UD.setdefault(uid,{})["template_id"]=tmpl_id
         tname=TEMPLATES.get(tmpl_id,{}).get("name","Shablon")
         img_kb2=types.InlineKeyboardMarkup(row_width=1)
-        img_kb2.add(types.InlineKeyboardButton("🖼 Rasm yuklaydi",callback_data="pimg:user"),
-                    types.InlineKeyboardButton("❌ Rasmsiz davom etish",callback_data="pimg:no"))
+        img_kb2.add(types.InlineKeyboardButton("🤖 AI avtomatik rasm qo'ysin",callback_data="pimg:ai"))
+        img_kb2.add(types.InlineKeyboardButton("🖼 O'zim rasm yuklaydi",callback_data="pimg:user"))
+        img_kb2.add(types.InlineKeyboardButton("❌ Rasmsiz davom etish",callback_data="pimg:no"))
+        img_kb2.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
         try: bot.edit_message_text(f"✅ {tname}\n\n🖼 Prezentatsiyaga rasm qo'shmoqchimisiz?",uid,call.message.message_id,reply_markup=img_kb2)
         except: bot.send_message(uid,f"✅ {tname}\n🖼 Rasm?",reply_markup=img_kb2)
 
     elif d.startswith("pimg:"):
-        choice=d[5:]; svc=ud.get("svc","prez")
+        choice=d[5:]; slides=ud.get("slides",10)
         if choice=="user":
-            sst(uid,f"wait_img_{svc}")
-            try: bot.edit_message_text("🖼 Rasmni yuboring:",uid,call.message.message_id,reply_markup=bk_kb())
+            sst(uid,"wait_img_prez")
+            try: bot.edit_message_text("🖼 Rasmni yuboring:\n(Keyin qaysi slaydga qo'yishni tanlaysiz)",uid,call.message.message_id,reply_markup=bk_kb())
             except: bot.send_message(uid,"🖼 Rasmni yuboring:",reply_markup=bk_kb())
+        elif choice=="ai":
+            # AI avtomatik rasm qo'yadi - qaysi slaydlarni tanlash
+            kb_ai=types.InlineKeyboardMarkup(row_width=5)
+            for i in range(1,min(slides+1,16)):
+                kb_ai.add(types.InlineKeyboardButton(str(i),callback_data=f"ai_img_slide:{i}"))
+            kb_ai.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
+            try:
+                bot.edit_message_text(
+                    "🤖 *AI avtomatik rasm qo'yadi!*\n\nQaysi slaydlarga rasm qo'yilsin?\n(Bir nechta tanlash mumkin)",
+                    uid,call.message.message_id,parse_mode="Markdown",reply_markup=kb_ai)
+            except: bot.send_message(uid,"Qaysi slaydlarga rasm?",reply_markup=kb_ai)
         else:
             sst(uid,"prez_lang")
             try: bot.edit_message_text("🌐 Qaysi tilda?",uid,call.message.message_id,reply_markup=lc_kb("prez_lang"))
@@ -934,7 +1086,8 @@ def cb_h(call):
         pm=bot.send_message(uid,f"⏳ {slides} ta slayd tayyorlanmoqda... 💰 {total:,} so'm ayirildi")
         try:
             tmpl_name=TEMPLATES.get(str(tmpl_id),TEMPLATES["1"])["name"]
-            content=gen_prez_content(topic,slides,tmpl_name,lang_code,ud)
+            plans_count=ud.get('plans_count',5)
+            content=gen_prez_content(topic,slides,tmpl_name,lang_code,ud,plans_count)
             user_imgs=UI.get(uid); img_pages=ud.get("img_pages")
             try: bot.delete_message(uid,pm.message_id)
             except: pass
@@ -997,7 +1150,8 @@ def cb_h(call):
         deduct(uid,total)
         pm=bot.send_message(uid,f"⏳ {count} ta savol yaratilmoqda...")
         try:
-            res=gen_test_content(topic,count,get_lang(uid))
+            with_img=ud.get('test_with_img',False)
+            res=gen_test_content(topic,count,get_lang(uid),with_img)
             try: bot.delete_message(uid,pm.message_id)
             except: pass
             if fmt=="txt":
@@ -1026,9 +1180,101 @@ def cb_h(call):
     elif d.startswith("resume:"):
         st2=d[7:]; svc=UD.get(uid,{}).get("svc","")
         if "tmpl" in st2 or st2=="prez_tmpl": show_templates(uid,1)
-        elif "lang" in st2:
-            bot.send_message(uid,"🌐 Qaysi tilda?",reply_markup=lc_kb(f"{svc}_lang"))
+        elif "lang" in st2: bot.send_message(uid,"🌐 Qaysi tilda?",reply_markup=lc_kb(f"{svc}_lang"))
         else: bot.send_message(uid,"📋 Asosiy menyu:",reply_markup=main_kb(uid))
+
+    # Slayd soni tugmasi
+    elif d.startswith("slides:"):
+        val=d[7:]
+        if val=="custom":
+            sst(uid,"prez_sl")
+            bot.edit_message_text(f"✏️ Necha slayd? (5-50)\n💰 1 slayd = {PRICE_SLIDE:,} so'm",
+                uid,call.message.message_id,reply_markup=bk_kb())
+        else:
+            slides=int(val); total=slides*PRICE_SLIDE
+            UD.setdefault(uid,{}).update({"slides":slides,"svc":"prez","total":total})
+            sst(uid,"prez_plans")
+            try:
+                bot.edit_message_text(
+                    f"✅ {slides} slayd × {PRICE_SLIDE:,} = *{total:,} so'm*\n\n"
+                    "📋 *Nechta reja (bo'lim) bo'lsin?*",
+                    uid,call.message.message_id,
+                    parse_mode="Markdown",reply_markup=plans_count_kb())
+            except: bot.send_message(uid,f"✅ {slides} slayd\n📋 Nechta reja?",reply_markup=plans_count_kb())
+
+    # Test soni tugmasi
+    elif d.startswith("tcount:"):
+        val=d[7:]
+        if val=="custom":
+            sst(uid,"test_cnt")
+            bot.edit_message_text(f"✏️ Nechta savol? (10-1000)\n💰 1 savol = {PRICE_TEST:,} so'm",
+                uid,call.message.message_id,reply_markup=bk_kb())
+        else:
+            count=int(val); total=count*PRICE_TEST; bal=get_balance(uid)
+            if bal<total:
+                bot.edit_message_text(f"❌ Mablag' yetarli emas!\nKerakli: {total:,}\nBalans: {bal:,}",
+                    uid,call.message.message_id); return
+            UD.setdefault(uid,{}).update({"count":count,"total":total})
+            img_kb2=types.InlineKeyboardMarkup(row_width=2)
+            img_kb2.add(types.InlineKeyboardButton("🖼 Ha, rasmli",callback_data="test_img:yes"),
+                        types.InlineKeyboardButton("📝 Oddiy test",callback_data="test_img:no"))
+            img_kb2.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
+            try:
+                bot.edit_message_text(
+                    f"✅ {count} ta savol × {PRICE_TEST:,} = *{total:,} so'm*\n\n"
+                    "🖼 Testda rasmlar bo'lsinmi?",
+                    uid,call.message.message_id,parse_mode="Markdown",reply_markup=img_kb2)
+            except: bot.send_message(uid,f"✅ {count} ta savol\n🖼 Rasmli?",reply_markup=img_kb2)
+
+    # Reja soni tugmasi
+    elif d.startswith("plans:"):
+        val=d[6:]
+        if val=="custom":
+            sst(uid,"prez_plans")
+            bot.edit_message_text("✏️ Nechta reja? (2-15 ta):",uid,call.message.message_id,reply_markup=bk_kb())
+        else:
+            plans=int(val)
+            UD.setdefault(uid,{})["plans_count"]=plans
+            sst(uid,"ask_name")
+            try:
+                bot.edit_message_text(f"✅ {plans} ta reja.\n\n👤 Ism va familiyangizni kiriting:",
+                    uid,call.message.message_id,reply_markup=bk_kb())
+            except: bot.send_message(uid,f"✅ {plans} ta reja.\n\n👤 Ism kiriting:",reply_markup=bk_kb())
+
+    # Test uchun rasm
+    elif d.startswith("test_img:"):
+        with_img=d[9:]=="yes"
+        UD.setdefault(uid,{})["test_with_img"]=with_img
+        try:
+            bot.edit_message_text("📁 Qaysi formatda olmoqchisiz?",
+                uid,call.message.message_id,reply_markup=fmt_kb("test_fmt"))
+        except: bot.send_message(uid,"📁 Format tanlang:",reply_markup=fmt_kb("test_fmt"))
+
+    # AI rasm qo'yish - qaysi slaydga
+    elif d.startswith("ai_img_slide:"):
+        slide_num=int(d[13:])
+        UD.setdefault(uid,{}).setdefault("ai_img_slides",[]).append(slide_num)
+        slides=ud.get("slides",10)
+        already=UD[uid].get("ai_img_slides",[])
+        kb3=types.InlineKeyboardMarkup(row_width=5)
+        for i in range(1,min(slides+1,16)):
+            label=f"✅{i}" if i in already else str(i)
+            kb3.add(types.InlineKeyboardButton(label,callback_data=f"ai_img_slide:{i}"))
+        kb3.add(types.InlineKeyboardButton("✅ Tayyor",callback_data="ai_img_done"))
+        kb3.add(types.InlineKeyboardButton("🏠 Asosiy menyu",callback_data="bk"))
+        try:
+            bot.edit_message_text(
+                f"✅ {slide_num}-slaydga AI rasm qo'yiladi!\n"
+                f"Tanlangan slaydlar: {already}\n\n"
+                "Yana slayd tanlang yoki 'Tayyor' bosing:",
+                uid,call.message.message_id,reply_markup=kb3)
+        except: pass
+
+    elif d=="ai_img_done":
+        sst(uid,"prez_lang")
+        try:
+            bot.edit_message_text("🌐 Qaysi tilda?",uid,call.message.message_id,reply_markup=lc_kb("prez_lang"))
+        except: bot.send_message(uid,"🌐 Qaysi tilda?",reply_markup=lc_kb("prez_lang"))
 
 if __name__=="__main__":
     init_db()
