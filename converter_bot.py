@@ -251,21 +251,28 @@ def gen_maqola(topic, pages, lang, ud={}):
 def gen_prez(topic, slides, style, lang, ud={}):
     ln = LN.get(lang, "o'zbek")
     uinfo = build_user_info(ud)
-    words_per_slide = 280
+    style_desc = {"klassik":"professional va rasmiy","zamonaviy":"zamonaviy va dinamik","minimalist":"sodda va toza","biznes":"biznes uslubida"}
+    sdesc = style_desc.get(style, "professional")
     return claude(
-        f"Mavzu: {topic}\nSlaydlar: {slides}\nUslub: {style}\nTil: {ln}\n{uinfo}\n\n"
-        f"Har bir slaydda kamida {words_per_slide} so'z bo'lsin.\n\n"
-        f"{ln} tilida {slides} ta BATAFSIL slayd yozing:\n\n"
-        "FORMAT:\n"
-        "SLAYD N: [Sarlavha]\n"
-        "[Kamida 280 so'z - to'liq matn, aniq faktlar, misollar, statistika]\n\n"
-        f"1-SLAYD: Sarlavha ({topic}) - muallif, universitet, sana\n"
-        f"2-SLAYD: Mundarija - {slides} ta bo'lim ro'yxati\n"
-        f"3-{slides-1}-SLAYD: Asosiy mazmun - har birida 280+ so'z\n"
-        f"{slides}-SLAYD: Xulosa va takliflar\n\n"
-        "MUHIM: Har slaydda aniq ilmiy faktlar, raqamlar, misollar keltiring!",
-        f"Siz professional {ln} prezentatsiya mutaxassisi. "
-        "Har slaydni batafsil, faktlar va misollar bilan to'ldiring.",
+        f"Mavzu: {topic}\nTil: {ln}\nUslub: {sdesc}\n{uinfo}\n\n"
+        f"QOIDALAR:\n"
+        f"1. Har slayd uchun AYNAN quyidagi formatda yoz\n"
+        f"2. Boshqa belgilar ishlatma (**, ##, * yo'q)\n"
+        f"3. Har slaydda kamida 5-7 ta aniq gap bo'lsin\n"
+        f"4. Aniq faktlar, raqamlar, misollar keltir\n\n"
+        f"FORMAT (aynan shu ko'rinishda):\n\n"
+        f"SLAYD 1: {topic}\n"
+        f"Taqdimotchi: [ism]\n"
+        f"[boshqa ma'lumotlar]\n\n"
+        f"SLAYD 2: Mundarija\n"
+        f"[{slides} ta mavzu ro'yxati]\n\n"
+        + "\n\n".join([f"SLAYD {i}: [Sarlavha]\n[5-7 ta aniq gap, faktlar, misollar, raqamlar]" for i in range(3, slides+1)]) +
+        f"\n\nSLAYD {slides}: Xulosa\n"
+        f"[Asosiy xulosalar va tavsiyalar]\n\n"
+        f"MUHIM: Hech qanday ** ## * belgi ishlatma! Faqat oddiy matn!",
+        f"Siz {ln} tilida professional prezentatsiya yozuvchi mutaxassississiz. "
+        f"Faqat oddiy matn, hech qanday markdown belgi ishlatma. "
+        f"Har slayd mazmunli, aniq faktlar va raqamlar bilan.",
         4000)
 
 def gen_test(topic, count, lang):
@@ -443,7 +450,11 @@ def make_pptx(content, topic, style="klassik", ud={}):
         slides_data = []
         cur_t, cur_b = topic, []
 
-        for line in content.strip().split("\n"):
+        # Markdown belgilarini tozalash
+        clean_content = content
+        clean_content = clean_content.replace("**", "").replace("##", "").replace("# ", "")
+        
+        for line in clean_content.strip().split("\n"):
             line = line.strip()
             if not line: continue
             ul = line.upper()
@@ -451,6 +462,8 @@ def make_pptx(content, topic, style="klassik", ud={}):
             if is_slide:
                 if cur_t: slides_data.append((cur_t, "\n".join(cur_b)))
                 cur_t = line.split(":",1)[1].strip(); cur_b = []
+            elif line.startswith(("►","▸","•","-")):
+                cur_b.append(line.lstrip("►▸•- "))
             else:
                 cur_b.append(line)
 
@@ -477,17 +490,22 @@ def make_pptx(content, topic, style="klassik", ud={}):
                 tf2 = cb.text_frame; tf2.word_wrap = True
                 lines = [l.strip() for l in body.split("\n") if l.strip()]
                 first = True
-                for line in lines[:20]:
+                # Matnni satrga bo'lib ko'rsatish
+                all_text = body.replace("**","").replace("##","").replace("# ","")
+                lines = [l.strip() for l in all_text.split("\n") if l.strip()]
+                first = True
+                for line in lines[:15]:
                     p2 = tf2.paragraphs[0] if first else tf2.add_paragraph()
                     first = False
-                    if line.startswith(("*","•","-","–")):
-                        p2.text = f"▸ {line.lstrip('*•-– ')}"
-                        p2.font.size = Pt(16)
+                    if line.startswith(("►","▸","•","-","*")):
+                        p2.text = f"▸  {line.lstrip('►▸•-* ')}"
+                        p2.font.size = Pt(17)
                     else:
                         p2.text = line
-                        p2.font.size = Pt(15)
+                        p2.font.size = Pt(16)
                     p2.font.color.rgb = tx
-                    p2.space_before = Pt(4)
+                    p2.space_before = Pt(3)
+                    p2.font.bold = False
 
         td = tempfile.mkdtemp()
         out = os.path.join(td, "prezentatsiya.pptx")
