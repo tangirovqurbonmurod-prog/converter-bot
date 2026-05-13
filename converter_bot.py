@@ -10,6 +10,7 @@ DONATE_URL     = os.environ.get("DONATE_URL",     "https://click.uz")
 DONATE_CARD    = os.environ.get("DONATE_CARD",    "9860 0609 2665 0809")
 DONATE_CLICK   = os.environ.get("DONATE_CLICK",   "+998 94 975 03 04")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
+UNSPLASH_KEY = os.environ.get("UNSPLASH_KEY", "")
 
 def gp(n,d): return int(os.environ.get(n,str(d)))
 PRICE_PAGE=gp("PRICE_PAGE",500); PRICE_KURS=gp("PRICE_KURS",700)
@@ -267,23 +268,34 @@ def create_slide_image(topic, slide_title, tmpl_id="1"):
         return None
 
 def get_unsplash_image(query):
-    """Internetdan mavzuga mos rasm olish"""
+    """Unsplash API orqali mavzuga mos sifatli rasm olish"""
     try:
         import hashlib, time
-        seed=int(hashlib.md5((query+str(time.time())).encode()).hexdigest()[:8],16)%9999
-        search_q=requests.utils.quote(query[:60])
-        url=f"https://source.unsplash.com/800x500/?{search_q}&sig={seed}"
-        r=requests.get(url,timeout=15,allow_redirects=True)
-        if r.status_code==200 and len(r.content)>8000:
-            buf=BytesIO(r.content); buf.seek(0)
-            logger.info(f"Unsplash OK: {query}"); return buf
+        search_q = requests.utils.quote(query[:60])
+        if UNSPLASH_KEY:
+            headers = {"Authorization": f"Client-ID {UNSPLASH_KEY}"}
+            r = requests.get(
+                f"https://api.unsplash.com/photos/random?query={search_q}&orientation=landscape",
+                headers=headers, timeout=15)
+            if r.status_code == 200:
+                img_url = r.json().get("urls", {}).get("regular", "")
+                if img_url:
+                    img_r = requests.get(img_url, timeout=15)
+                    if img_r.status_code == 200 and len(img_r.content) > 5000:
+                        buf = BytesIO(img_r.content); buf.seek(0)
+                        logger.info(f"Unsplash API OK: {query}"); return buf
+        seed = int(hashlib.md5((query+str(time.time())).encode()).hexdigest()[:8],16)%9999
+        url = f"https://source.unsplash.com/800x500/?{search_q}&sig={seed}"
+        r2 = requests.get(url, timeout=15, allow_redirects=True)
+        if r2.status_code == 200 and len(r2.content) > 5000:
+            buf2 = BytesIO(r2.content); buf2.seek(0); return buf2
     except Exception as e: logger.warning(f"Unsplash xato: {e}")
     try:
         import hashlib
-        seed2=int(hashlib.md5(query.encode()).hexdigest()[:8],16)%9999
-        r2=requests.get(f"https://picsum.photos/seed/{seed2}/800/500",timeout=10,allow_redirects=True)
-        if r2.status_code==200 and len(r2.content)>8000:
-            buf2=BytesIO(r2.content); buf2.seek(0); return buf2
+        seed2 = int(hashlib.md5(query.encode()).hexdigest()[:8],16)%9999
+        r3 = requests.get(f"https://picsum.photos/seed/{seed2}/800/500",timeout=10,allow_redirects=True)
+        if r3.status_code == 200 and len(r3.content) > 5000:
+            buf3 = BytesIO(r3.content); buf3.seek(0); return buf3
     except: pass
     return None
 
