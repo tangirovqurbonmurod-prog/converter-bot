@@ -1426,4 +1426,4 @@ def cb_h(call):
 if __name__=="__main__":
     init_db()
     print("EduBot v7 ishga tushdi!")
-    bot.infinity_polling()
+    bot.infinity_polling() 
