@@ -27,6 +27,7 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS users(telegram_id INTEGER PRIMARY KEY,username TEXT,first_name TEXT,lang TEXT DEFAULT 'uz',balance INTEGER DEFAULT 0,joined_at TEXT)""")
     cur.execute("""CREATE TABLE IF NOT EXISTS orders(telegram_id INTEGER PRIMARY KEY,state TEXT,data TEXT,updated_at TEXT)""")
     cur.execute("""CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,telegram_id INTEGER,action TEXT,detail TEXT,income INTEGER DEFAULT 0,created_at TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS buyurtmalar(id INTEGER PRIMARY KEY AUTOINCREMENT,telegram_id INTEGER,tur TEXT,mavzu TEXT,format TEXT,sahifalar TEXT,narx INTEGER,holat TEXT DEFAULT 'tayyor',created_at TEXT)""")
     c.commit(); c.close()
 
 def save_order(uid, state, data):
@@ -94,6 +95,22 @@ def log_act(uid,action,detail="",income=0):
     c=sqlite3.connect("edubot.db"); cur=c.cursor()
     cur.execute("INSERT INTO stats(telegram_id,action,detail,income,created_at) VALUES(?,?,?,?,?)",(uid,action,detail,income,datetime.now().strftime("%d.%m.%Y %H:%M")))
     c.commit(); c.close()
+def save_buyurtma(uid, tur, mavzu, fmt, sahifalar, narx):
+    try:
+        c=sqlite3.connect("edubot.db"); cur=c.cursor()
+        cur.execute("INSERT INTO buyurtmalar(telegram_id,tur,mavzu,format,sahifalar,narx,created_at) VALUES(?,?,?,?,?,?,?)",
+            (uid,tur,mavzu,fmt,str(sahifalar),narx,datetime.now().strftime("%d.%m.%Y %H:%M")))
+        c.commit(); c.close()
+    except: pass
+
+def get_buyurtmalar(uid):
+    try:
+        c=sqlite3.connect("edubot.db"); cur=c.cursor()
+        cur.execute("SELECT tur,mavzu,format,sahifalar,narx,created_at FROM buyurtmalar WHERE telegram_id=? ORDER BY id DESC LIMIT 10",(uid,))
+        rows=cur.fetchall(); c.close()
+        return rows
+    except: return []
+
 def all_users():
     c=sqlite3.connect("edubot.db"); cur=c.cursor()
     cur.execute("SELECT telegram_id FROM users"); rows=cur.fetchall(); c.close()
@@ -244,32 +261,7 @@ def create_slide_image(topic, slide_title, tmpl_id="1"):
         return None
 
 def get_unsplash_image(query):
-    """Internetdan mavzuga mos rasm olish - har slayd uchun turli rasm"""
-    try:
-        import hashlib, time
-        # Har query uchun unikal seed — bir xil rasm chiqmasin
-        seed = int(hashlib.md5((query + str(time.time())).encode()).hexdigest()[:8], 16) % 9999
-        # Unsplash Source — mavzuga mos rasm
-        search_q = requests.utils.quote(query[:60])
-        url = f"https://source.unsplash.com/800x500/?{search_q}&sig={seed}"
-        r = requests.get(url, timeout=15, allow_redirects=True)
-        if r.status_code == 200 and len(r.content) > 8000:
-            buf = BytesIO(r.content); buf.seek(0)
-            logger.info(f"Unsplash rasm OK: {query}")
-            return buf
-    except Exception as e:
-        logger.warning(f"Unsplash xato: {e}")
-    try:
-        import hashlib
-        seed2 = int(hashlib.md5(query.encode()).hexdigest()[:8], 16) % 9999
-        url2 = f"https://picsum.photos/seed/{seed2}/800/500"
-        r2 = requests.get(url2, timeout=10, allow_redirects=True)
-        if r2.status_code == 200 and len(r2.content) > 8000:
-            buf2 = BytesIO(r2.content); buf2.seek(0)
-            logger.info(f"Picsum rasm OK: {query}")
-            return buf2
-    except Exception as e2:
-        logger.warning(f"Picsum xato: {e2}")
+    """Endi create_slide_image ishlatiladi"""
     return None
 
 def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
@@ -287,12 +279,13 @@ def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
         "1. FORMAT: SLAYD N: [Sarlavha]\n[Mazmun - 5-8 ta aniq gap]\n\n"
         "2. Hech qanday **, ##, * belgisi ISHLATMA\n"
         "3. Har slaydda aniq faktlar, raqamlar, misollar\n"
-        f"4. SLAYD 1: {topic} - sarlavha slayd (muallif, universitet, sana)\n"
-        f"5. SLAYD 2: REJALAR (majburiy! sarlavha aynan 'REJALAR' bo'lsin) - {plans_count} ta bo'lim ro'yxati, har biri raqamlangan\n"
-        f"6. SLAYD 3-{slides-1}: Asosiy mazmun - har reja {slides_per_plan} ta slayd\n"
-        f"7. SLAYD {slides}: Xulosa va savollar\n\n"
-        f"Barcha {slides} ta slaydni to'liq yoz! 2-slayd nomi REJALAR bo'lsin!",
-        f"Professional {ln} prezentatsiya mutaxassisi. Markdown belgisiz, mazmunli, faktlar bilan.",4000)
+        f"4. SLAYD 1: bo'sh qoldirilsin - faqat 'SLAYD 1: {topic}' yozilsin, mazmun yozilmasin\n"
+        f"5. SLAYD 2: sarlavha aynan 'REJALAR' - {plans_count} ta bo'lim ro'yxati raqamlangan\n"
+        f"6. SLAYD 3-{slides-1}: Har slaydda O'Z SARLAVHASI bo'lsin (rejadan olingan), mazmun shu sarlavhaga mos\n"
+        f"7. SLAYD {slides}: Xulosa\n\n"
+        "DIQQAT: Har bir slaydning sarlavhasi TURLICHA bo'lsin! Hech qachon bir xil sarlavha takrorlanmasin!\n"
+        f"Barcha {slides} ta slaydni to'liq yoz!",
+        f"Professional {ln} prezentatsiya mutaxassisi. Har slayd o'z sarlavhasi va o'z mazmuniga ega. Markdown belgisiz.",4000)
     return clean_ai_text(result)
 
 def gen_test_content(topic, count, lang, with_img=False):
@@ -368,13 +361,13 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
             bar.fill.solid(); bar.fill.fore_color.rgb=acc; bar.line.fill.background()
         except: pass
         if sn==0:
-            # 1-SLAYD: faqat mavzu nomi va foydalanuvchi ma'lumotlari
-            tb=sl.shapes.add_textbox(Inches(1),Inches(1.2),Inches(11.33),Inches(2.8))
+            # 1-SLAYD: faqat mavzu va foydalanuvchi ma'lumotlari
+            tb=sl.shapes.add_textbox(Inches(1),Inches(1.2),Inches(11.33),Inches(2.5))
             tf=tb.text_frame; tf.word_wrap=True
             p=tf.paragraphs[0]; p.text=topic
-            p.font.size=Pt(40); p.font.bold=True; p.font.color.rgb=tc; p.alignment=PP_ALIGN.CENTER
+            p.font.size=Pt(38); p.font.bold=True; p.font.color.rgb=tc; p.alignment=PP_ALIGN.CENTER
             try:
-                sep=sl.shapes.add_shape(1,Inches(3),Inches(4.1),Inches(7.33),Inches(0.06))
+                sep=sl.shapes.add_shape(1,Inches(3),Inches(4.0),Inches(7.33),Inches(0.06))
                 sep.fill.solid(); sep.fill.fore_color.rgb=acc; sep.line.fill.background()
             except: pass
             info_lines=[]
@@ -386,7 +379,7 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
             if ud.get("teacher"): info_lines.append(f"O'qituvchi: {ud['teacher']}")
             if ud.get("city"): info_lines.append(f"Shahar: {ud['city']}")
             info_lines.append(datetime.now().strftime("%Y-yil"))
-            tb2=sl.shapes.add_textbox(Inches(1),Inches(4.3),Inches(11.33),Inches(2.8))
+            tb2=sl.shapes.add_textbox(Inches(1),Inches(4.2),Inches(11.33),Inches(2.8))
             tf2=tb2.text_frame; tf2.word_wrap=True; first2=True
             for ln_txt in info_lines:
                 p2=tf2.paragraphs[0] if first2 else tf2.add_paragraph(); first2=False
@@ -422,7 +415,7 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
         else:
             tb=sl.shapes.add_textbox(Inches(0.4),Inches(0.2),Inches(12.53),Inches(1.2))
             tf=tb.text_frame; tf.word_wrap=True
-            p=tf.paragraphs[0]; p.text=topic[:80]
+            p=tf.paragraphs[0]; p.text=title[:80]
             p.font.size=Pt(30); p.font.bold=True; p.font.color.rgb=tc
             try:
                 ln2=sl.shapes.add_shape(1,Inches(0.4),Inches(1.55),Inches(12.53),Inches(0.07))
@@ -456,12 +449,12 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
                             Inches(4.2),Inches(5.4))
                         logger.info(f"User img added: slide {sn+1}")
                 except Exception as e: logger.error(f"User img:{e}")
-    # AI rasm qo'yish (tanlangan slaydlarga) - internetdan mavzuga mos rasm
+    # AI rasm qo'yish (tanlangan slaydlarga) - PIL bilan yaratilgan rasm
     ai_img_slides=ud.get("ai_img_slides",[])
     tmpl_id_for_img=str(ud.get("template_id","1"))
     if ai_img_slides:
         slide_list=list(prs.slides)
-        for idx_num, slide_num in enumerate(ai_img_slides):
+        for slide_num in ai_img_slides:
             try:
                 if slide_num-1 < len(slide_list):
                     sl2=slide_list[slide_num-1]
@@ -470,19 +463,16 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
                     for sh in sl2.shapes:
                         if sh.has_text_frame and sh.text_frame.paragraphs:
                             t=sh.text_frame.paragraphs[0].text.strip()
-                            if t and len(t)>3 and t!=topic: slide_title=t; break
-                    # Har slayd uchun TURLI so'rov — sarlavha + mavzu + tartib raqam
-                    img_query=f"{slide_title} {topic}"[:60]
-                    img_buf=get_unsplash_image(img_query)
-                    if not img_buf:
-                        img_buf=create_slide_image(topic, slide_title, tmpl_id_for_img)
+                            if t and len(t)>2: slide_title=t; break
+                    # PIL bilan rasm yaratish
+                    img_buf=create_slide_image(topic,slide_title,tmpl_id_for_img)
                     if img_buf:
-                        # O'ng pastki qismga, matnni to'smasdan
+                        # Slaydning o'ng tomoniga qo'yish
                         sl2.shapes.add_picture(
                             img_buf,
-                            Inches(8.6), Inches(1.7),
-                            Inches(4.5), Inches(3.8))
-                        logger.info(f"Rasm qo'shildi slayd {slide_num}: {img_query}")
+                            Inches(8.8), Inches(1.6),
+                            Inches(4.2), Inches(5.4))
+                        logger.info(f"AI img added to slide {slide_num}")
             except Exception as ie:
                 logger.error(f"AI img slide {slide_num}: {ie}")
 
@@ -741,7 +731,7 @@ def main_kb(uid):
     kb.row("📋 Mustaqil ish","📰 Maqola")
     kb.row("📊 Prezentatsiya","✅ Test")
     kb.row("✏️ Imlo tuzatish","🔄 Konvertatsiya")
-    kb.row("💰 Balans","📦 Buyurtmam")
+    kb.row("💰 Balans","📦 Buyurtmalarim")
     kb.row("💝 Donat","❓ Yordam")
     kb.add("👨‍💼 Admin")
     return kb
@@ -1076,6 +1066,19 @@ def text_h(msg):
         bot.send_message(uid,f"💝 *Donat*\n\n💳 Karta: `{DONATE_CARD}`\n🟢 Click: `{DONATE_CLICK}`",parse_mode="Markdown",reply_markup=kb2); return
     if text=="❓ Yordam":
         bot.send_message(uid,f"❓ *Narxlar:*\n📄 Referat: {PRICE_PAGE:,}/bet\n📝 Kurs ishi: {PRICE_KURS:,}/bet\n📋 Mustaqil: {PRICE_MUSTAQIL:,}/bet\n📰 Maqola: {PRICE_MAQOLA:,}/bet\n📊 Prezentatsiya: {PRICE_SLIDE:,}/slayd\n✅ Test: {PRICE_TEST:,}/savol",parse_mode="Markdown",reply_markup=main_kb(uid)); return
+    if text=="📦 Buyurtmalarim":
+        rows=get_buyurtmalar(uid)
+        if not rows:
+            bot.send_message(uid,"📦 Hozircha buyurtmalaringiz yo'q.",reply_markup=main_kb(uid)); return
+        tur_nomi={"referat":"📄 Referat","kurs":"📝 Kurs ishi","mustaqil":"📋 Mustaqil ish",
+                  "maqola":"📰 Maqola","prez":"📊 Prezentatsiya","test":"✅ Test"}
+        txt="📦 *Oxirgi buyurtmalaringiz:*\n\n"
+        for i,(tur,mavzu,fmt,sah,narx,sana) in enumerate(rows,1):
+            t=tur_nomi.get(tur,tur)
+            sah_txt=f"{sah} bet" if tur not in ("prez","test") else (f"{sah} slayd" if tur=="prez" else f"{sah} savol")
+            txt+=f"{i}. {t}\n📌 Mavzu: {mavzu}\n📁 Format: {fmt.upper()} | {sah_txt}\n💰 {narx:,} so'm | {sana}\n\n"
+        bot.send_message(uid,txt,parse_mode="Markdown",reply_markup=main_kb(uid)); return
+
     if "Admin" in text:
         kb2=types.InlineKeyboardMarkup()
         kb2.add(types.InlineKeyboardButton("💬 Adminga yozish",url=f"https://t.me/{ADMIN_USERNAME.lstrip('@')}"))
@@ -1249,6 +1252,7 @@ def cb_h(call):
                     with open(op,"rb") as f: bot.send_document(uid,f,caption=f"🌐 {topic} (HTML - brauzerda oching)")
                     shutil.rmtree(td2,ignore_errors=True)
             log_act(uid,"prez",topic,total)
+            save_buyurtma(uid,"prez",topic,fmt,ud.get('slides',0),total)
         except Exception as e:
             logger.error(f"Prez:{e}"); add_bal(uid,total); bot.send_message(uid,"❌ Xatolik. Pul qaytarildi.")
         cst(uid); UI.pop(uid,None)
@@ -1286,6 +1290,7 @@ def cb_h(call):
                     with open(op,"rb") as f: bot.send_document(uid,f,caption=f"📄 {title}")
                     shutil.rmtree(td2,ignore_errors=True)
             log_act(uid,svc,topic,total)
+            save_buyurtma(uid,svc,topic,fmt,ud.get('pages',0),total)
         except Exception as e:
             logger.error(f"Gen:{e}"); add_bal(uid,total); bot.send_message(uid,"❌ Xatolik. Pul qaytarildi.")
         cst(uid); bot.send_message(uid,f"✅ Tayyor! Balans: {get_balance(uid):,} so'm",reply_markup=main_kb(uid))
@@ -1311,6 +1316,7 @@ def cb_h(call):
                     with open(op,"rb") as f: bot.send_document(uid,f,caption=f"{cap} Test: {topic}")
                     shutil.rmtree(td2,ignore_errors=True)
             log_act(uid,"test",topic,total)
+            save_buyurtma(uid,"test",topic,fmt,ud.get('count',0),total)
         except Exception as e:
             logger.error(f"Test:{e}"); add_bal(uid,total); bot.send_message(uid,"❌ Xatolik. Pul qaytarildi.")
         cst(uid); bot.send_message(uid,f"✅ Tayyor! Balans: {get_balance(uid):,} so'm",reply_markup=main_kb(uid))
@@ -1426,4 +1432,4 @@ def cb_h(call):
 if __name__=="__main__":
     init_db()
     print("EduBot v7 ishga tushdi!")
-    bot.infinity_polling() 
+    bot.infinity_polling()
