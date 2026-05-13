@@ -244,7 +244,35 @@ def create_slide_image(topic, slide_title, tmpl_id="1"):
         return None
 
 def get_unsplash_image(query):
-    """Endi create_slide_image ishlatiladi"""
+    """Internetdan mavzuga mos rasm olish (Unsplash va fallback)"""
+    try:
+        # Unsplash Source - hech qanday API key shart emas
+        search_q = requests.utils.quote(query[:50])
+        url = f"https://source.unsplash.com/800x500/?{search_q}"
+        r = requests.get(url, timeout=15, allow_redirects=True)
+        if r.status_code == 200 and len(r.content) > 5000:
+            buf = BytesIO(r.content)
+            buf.seek(0)
+            logger.info(f"Unsplash rasm olindi: {query}")
+            return buf
+    except Exception as e:
+        logger.warning(f"Unsplash xato: {e}")
+    
+    try:
+        # Fallback: Picsum Photos (doim ishlaydi)
+        import hashlib
+        seed = int(hashlib.md5(query.encode()).hexdigest()[:8], 16) % 1000
+        url2 = f"https://picsum.photos/seed/{seed}/800/500"
+        r2 = requests.get(url2, timeout=10, allow_redirects=True)
+        if r2.status_code == 200 and len(r2.content) > 5000:
+            buf2 = BytesIO(r2.content)
+            buf2.seek(0)
+            logger.info(f"Picsum fallback rasm olindi: {query}")
+            return buf2
+    except Exception as e2:
+        logger.warning(f"Picsum xato: {e2}")
+    
+    # Oxirgi fallback: PIL bilan yaratilgan rasm
     return None
 
 def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
@@ -400,7 +428,8 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
             except: pass
             if bullets:
                 has_img=img_pages and any(img_pages.get(str(i))==sn+1 for i in range(len(user_imgs or [])))
-                txt_w=8.5 if has_img else 12.5
+                has_ai_img = sn+1 in ud.get("ai_img_slides",[])
+                txt_w=7.8 if (has_img or has_ai_img) else 12.5
                 tb2=sl.shapes.add_textbox(Inches(0.4),Inches(1.75),Inches(txt_w),Inches(5.5))
                 tf2=tb2.text_frame; tf2.word_wrap=True
                 first=True
@@ -426,7 +455,7 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
                             Inches(4.2),Inches(5.4))
                         logger.info(f"User img added: slide {sn+1}")
                 except Exception as e: logger.error(f"User img:{e}")
-    # AI rasm qo'yish (tanlangan slaydlarga) - PIL bilan yaratilgan rasm
+    # AI rasm qo'yish (tanlangan slaydlarga) - internetdan mavzuga mos rasm
     ai_img_slides=ud.get("ai_img_slides",[])
     tmpl_id_for_img=str(ud.get("template_id","1"))
     if ai_img_slides:
@@ -441,15 +470,35 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
                         if sh.has_text_frame and sh.text_frame.paragraphs:
                             t=sh.text_frame.paragraphs[0].text.strip()
                             if t and len(t)>2: slide_title=t; break
-                    # PIL bilan rasm yaratish
-                    img_buf=create_slide_image(topic,slide_title,tmpl_id_for_img)
+                    
+                    # Shu slaydga mos so'z bilan internet rasm qidirish
+                    img_query = f"{topic} {slide_title}".strip()[:60]
+                    img_buf = get_unsplash_image(img_query)
+                    
+                    # Agar internet rasm kelmasa, PIL bilan yaratish
+                    if not img_buf:
+                        img_buf = create_slide_image(topic, slide_title, tmpl_id_for_img)
+                    
                     if img_buf:
-                        # Slaydning o'ng tomoniga qo'yish
+                        # Matn o'ng tomonda bo'lishi uchun: rasm PASTKI o'ng burchakka, kichikroq
+                        # Slayd: 13.33 x 7.5 inch
+                        # Rasm o'rni: o'ng pastda, matnni to'smaydigan joy
                         sl2.shapes.add_picture(
                             img_buf,
-                            Inches(8.8), Inches(1.6),
-                            Inches(4.2), Inches(5.4))
-                        logger.info(f"AI img added to slide {slide_num}")
+                            Inches(8.6), Inches(1.7),   # chap, yuqori
+                            Inches(4.5), Inches(3.8))   # kenglik, balandlik
+                        
+                        # Matn qutisini chegaralash (agar allaqachon qo'shilgan bo'lsa)
+                        for shp in sl2.shapes:
+                            if shp.has_text_frame and shp != sl2.shapes[0]:
+                                try:
+                                    # Matn o'ng tomoniga chiqmasligi uchun kenglikni kamaytirish
+                                    if float(shp.left)/914400 < 4 and float(shp.width)/914400 > 8:
+                                        from pptx.util import Inches as In2
+                                        shp.width = In2(8.0)
+                                except: pass
+                        
+                        logger.info(f"Rasm qo'shildi slayd {slide_num}: {img_query}")
             except Exception as ie:
                 logger.error(f"AI img slide {slide_num}: {ie}")
 
@@ -658,13 +707,46 @@ def k2l(t):
     return r
 
 ST,UD,UI,HIST={},{},{},{}
+
+# Orqaga tugmasi uchun holat tarixi
+BACK_HISTORY={}
+
+STATE_ORDER=[
+    "referat_t","referat_p","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","referat_lang",
+    "kurs_t","kurs_p","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","kurs_lang",
+    "mustaqil_t","mustaqil_p","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","mustaqil_lang",
+    "maqola_t","maqola_p","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","maqola_lang",
+    "prez_t","prez_sl","prez_plans","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","prez_tmpl","prez_lang",
+    "test_t","test_cnt",
+]
+
 def sst(uid,s,**kw):
+    # Oldingi holatni tarixga qo'shish
+    prev=ST.get(uid)
+    if prev and prev!=s:
+        if uid not in BACK_HISTORY:
+            BACK_HISTORY[uid]=[]
+        BACK_HISTORY[uid].append(prev)
+        if len(BACK_HISTORY[uid])>15:
+            BACK_HISTORY[uid]=BACK_HISTORY[uid][-15:]
     ST[uid]=s; UD.setdefault(uid,{}).update(kw)
     try: save_order(uid,s,UD.get(uid,{}))
     except: pass
+
 def gst(uid): return ST.get(uid)
+
 def cst(uid):
-    ST.pop(uid,None); clear_order(uid)
+    ST.pop(uid,None); BACK_HISTORY.pop(uid,None); clear_order(uid)
+
+def go_back(uid):
+    """Oldingi holatga qaytish"""
+    history=BACK_HISTORY.get(uid,[])
+    if not history:
+        return None
+    prev_state=history.pop()
+    BACK_HISTORY[uid]=history
+    ST[uid]=prev_state
+    return prev_state
 
 INFO_STEPS=[
     ("ask_name","full_name","👤 Ism va familiyangizni kiriting:",True),
