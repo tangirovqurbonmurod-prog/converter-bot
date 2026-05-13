@@ -118,7 +118,7 @@ def claude(prompt,system="",max_tok=4000):
 
 def build_info(ud):
     parts=[]
-    for k,lbl in [("full_name","Muallif"),("university","Universitet"),("faculty","Fakultet"),("year","Kurs"),("teacher","O'qituvchi"),("city","Shahar")]:
+    for k,lbl in [("full_name","Muallif"),("subject","Fan"),("university","Universitet"),("faculty","Fakultet"),("year","Kurs"),("teacher","O'qituvchi"),("city","Shahar")]:
         if ud.get(k): parts.append(f"{lbl}: {ud[k]}")
     return "\n".join(parts)
 
@@ -126,18 +126,26 @@ def gen_text(svc,topic,pages,lang,ud={}):
     ln=LN.get(lang,"o'zbek"); info=build_info(ud)
     wpg={"referat":300,"kurs":350,"mustaqil":280,"maqola":320}.get(svc,300)
     structs={
-        "referat":"**KIRISH** (200+ so'z)\n**I BOB** (300+ so'z)\n**II BOB** (300+ so'z)\n**III BOB** (300+ so'z)\n**XULOSA** (150+ so'z)\n**ADABIYOTLAR** (10 ta manba)",
-        "kurs":"**MUNDARIJA**\n**KIRISH** (maqsad,vazifalar,dolzarblik - 300 so'z)\n**I BOB: Nazariy asos** (400+ so'z)\n**II BOB: Tahlil** (400+ so'z)\n**III BOB: Tavsiyalar** (300+ so'z)\n**XULOSA** (200 so'z)\n**ADABIYOTLAR** (15 ta APA)\n**ILOVALAR**",
-        "mustaqil":"**KIRISH** (200+ so'z)\n**ASOSIY QISM 1** (300+ so'z)\n**ASOSIY QISM 2** (300+ so'z)\n**XULOSA** (150+ so'z)\n**ADABIYOTLAR** (8 ta)",
-        "maqola":"**ANNOTATSIYA** (150 so'z)\n**KALIT SO'ZLAR** (7 ta)\n**ABSTRACT** (inglizcha)\n**KEYWORDS**\n**KIRISH** (300+ so'z)\n**ADABIYOTLAR TAHLILI** (250+ so'z)\n**METODOLOGIYA** (200+ so'z)\n**NATIJALAR** (400+ so'z)\n**XULOSA** (200 so'z)\n**ADABIYOTLAR** (15 ta APA)"
+        "referat":"KIRISH (200+ so'z)\nI BOB (300+ so'z)\nII BOB (300+ so'z)\nIII BOB (300+ so'z)\nXULOSA (150+ so'z)\nADABIYOTLAR (10 ta manba)",
+        "kurs":"MUNDARIJA\nKIRISH (maqsad, vazifalar, dolzarblik - 300 so'z)\nI BOB: Nazariy asos (400+ so'z)\nII BOB: Tahlil (400+ so'z)\nIII BOB: Tavsiyalar (300+ so'z)\nXULOSA (200 so'z)\nADABIYOTLAR (15 ta APA)\nILOVALAR",
+        "mustaqil":"KIRISH (200+ so'z)\nASOSIY QISM 1 (300+ so'z)\nASOSIY QISM 2 (300+ so'z)\nXULOSA (150+ so'z)\nADABIYOTLAR (8 ta)",
+        "maqola":"ANNOTATSIYA (150 so'z)\nKALIT SO'ZLAR (7 ta)\nABSTRACT (inglizcha)\nKEYWORDS\nKIRISH (300+ so'z)\nADABIYOTLAR TAHLILI (250+ so'z)\nMETODOLOGIYA (200+ so'z)\nNATIJALAR (400+ so'z)\nXULOSA (200 so'z)\nADABIYOTLAR (15 ta APA)"
     }
     struct=structs.get(svc,structs["referat"])
     names={"referat":"referat","kurs":"kurs ishi","mustaqil":"mustaqil ish","maqola":"ilmiy maqola"}
+    subject_info = f"\nFan: {ud['subject']}" if ud.get('subject') else ""
     res=claude(
-        f"Mavzu: {topic}\nHajm: {pages} bet ({pages*wpg}+ so'z)\n{info}\n\n"
+        f"Mavzu: {topic}\nHajm: {pages} bet ({pages*wpg}+ so'z)\n{info}{subject_info}\n\n"
         f"{ln} tilida TO'LIQ {names.get(svc,'hujjat')} yozing:\n{struct}\n\n"
-        "MUHIM: Har bo'limni to'liq, faktlar va misollar bilan yoz. Qisqartirma!",
-        f"Professional {ln} akademik yozuvchi. To'liq, ilmiy, imlo xatosiz.",4000)
+        "QATIY TALABLAR:\n"
+        "1. Faqat ilmiy kitoblar va darsliklardan olingan ma'lumotlar ishlatilsin\n"
+        "2. Har bir bo'lim to'liq, aniq faktlar va raqamlar bilan yozilsin\n"
+        "3. Hech qanday **, *, #, `, ~ belgilari ISHLATILMASIN\n"
+        "4. Imlo xatolari bo'lmasin, grammatika to'g'ri bo'lsin\n"
+        "5. Qisqartirma va tushirib qoldirish MUTLAQO TA'QIQLANGAN",
+        f"Sen professional {ln} akademik yozuvchisan. Faqat ilmiy manbalardan foydalanasan. "
+        f"Imlo va grammatika xatosiz yozasan. Markdown belgilarini ASLO ishlatmaysan. "
+        f"Har bir gapni to'g'ri va ravshan yozasan.", 4000)
     return clean_ai_text(res)
 
 TEMPLATES={
@@ -244,58 +252,51 @@ def create_slide_image(topic, slide_title, tmpl_id="1"):
         return None
 
 def get_unsplash_image(query):
-    """Internetdan mavzuga mos rasm olish (Unsplash va fallback)"""
+    """Internetdan mavzuga mos rasm olish"""
     try:
-        # Unsplash Source - hech qanday API key shart emas
-        search_q = requests.utils.quote(query[:50])
-        url = f"https://source.unsplash.com/800x500/?{search_q}"
-        r = requests.get(url, timeout=15, allow_redirects=True)
-        if r.status_code == 200 and len(r.content) > 5000:
-            buf = BytesIO(r.content)
-            buf.seek(0)
+        search_q=requests.utils.quote(query[:50])
+        url=f"https://source.unsplash.com/800x500/?{search_q}"
+        r=requests.get(url,timeout=15,allow_redirects=True)
+        if r.status_code==200 and len(r.content)>5000:
+            buf=BytesIO(r.content); buf.seek(0)
             logger.info(f"Unsplash rasm olindi: {query}")
             return buf
     except Exception as e:
         logger.warning(f"Unsplash xato: {e}")
-    
     try:
-        # Fallback: Picsum Photos (doim ishlaydi)
         import hashlib
-        seed = int(hashlib.md5(query.encode()).hexdigest()[:8], 16) % 1000
-        url2 = f"https://picsum.photos/seed/{seed}/800/500"
-        r2 = requests.get(url2, timeout=10, allow_redirects=True)
-        if r2.status_code == 200 and len(r2.content) > 5000:
-            buf2 = BytesIO(r2.content)
-            buf2.seek(0)
-            logger.info(f"Picsum fallback rasm olindi: {query}")
+        seed=int(hashlib.md5(query.encode()).hexdigest()[:8],16)%1000
+        url2=f"https://picsum.photos/seed/{seed}/800/500"
+        r2=requests.get(url2,timeout=10,allow_redirects=True)
+        if r2.status_code==200 and len(r2.content)>5000:
+            buf2=BytesIO(r2.content); buf2.seek(0)
             return buf2
     except Exception as e2:
         logger.warning(f"Picsum xato: {e2}")
-    
-    # Oxirgi fallback: PIL bilan yaratilgan rasm
     return None
 
 def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
     ln=LN.get(lang,"o'zbek"); info=build_info(ud)
-    # Reja sarlavhalarini hisoblash
-    content_slides=slides-3  # Sarlavha+Reja+Xulosa chiqarib
+    content_slides=slides-3
     slides_per_plan=max(1,content_slides//plans_count)
-    
-    plan_str="\n".join([f"  {i+1}. [Reja {i+1} sarlavhasi]" for i in range(plans_count)])
-    
+    subject_info = f"\nFan: {ud['subject']}" if ud.get('subject') else ""
+
     result=claude(
-        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nUslub: {tmpl_name}\n{info}\n"
+        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nUslub: {tmpl_name}\n{info}{subject_info}\n"
         f"Rejalar soni: {plans_count}\n\n"
         "QATIY QOIDALAR:\n"
-        "1. FORMAT: SLAYD N: [Sarlavha]\n[Mazmun - 5-8 ta aniq gap]\n\n"
-        "2. Hech qanday **, ##, * belgisi ISHLATMA\n"
-        "3. Har slaydda aniq faktlar, raqamlar, misollar\n"
-        f"4. SLAYD 1: {topic} - sarlavha slayd (muallif, universitet, sana)\n"
-        f"5. SLAYD 2: REJALAR (majburiy! sarlavha aynan 'REJALAR' bo'lsin) - {plans_count} ta bo'lim ro'yxati, har biri raqamlangan\n"
-        f"6. SLAYD 3-{slides-1}: Asosiy mazmun - har reja {slides_per_plan} ta slayd\n"
-        f"7. SLAYD {slides}: Xulosa va savollar\n\n"
-        f"Barcha {slides} ta slaydni to'liq yoz! 2-slayd nomi REJALAR bo'lsin!",
-        f"Professional {ln} prezentatsiya mutaxassisi. Markdown belgisiz, mazmunli, faktlar bilan.",4000)
+        "1. FORMAT: SLAYD N: [Sarlavha]\n[Mazmun - 5-7 ta aniq gap]\n\n"
+        "2. Hech qanday **, ##, *, #, `, ~ belgisi ISHLATILMASIN\n"
+        "3. Har slaydda aniq faktlar, raqamlar, ilmiy ma'lumotlar (kitoblardan)\n"
+        f"4. SLAYD 1: Faqat '{topic}' mavzu nomi. Boshqa hech narsa yozilmasin.\n"
+        f"5. SLAYD 2: sarlavha aynan 'REJALAR' bo'lsin - {plans_count} ta bo'lim ro'yxati\n"
+        f"6. SLAYD 3-{slides-1}: Asosiy ilmiy mazmun - har reja {slides_per_plan} ta slayd\n"
+        f"7. SLAYD {slides}: Xulosa\n\n"
+        "IMLO: Barcha so'zlar imlo qoidalariga to'liq mos, xatosiz yozilsin!\n"
+        f"Barcha {slides} ta slaydni to'liq yoz!",
+        f"Sen professional {ln} prezentatsiya mutaxassisisan. "
+        f"Faqat ilmiy manbalardan ma'lumot olasan. "
+        f"Markdown belgisi ASLO ishlatmaysan. Imlo xatosiz yozasan.", 4000)
     return clean_ai_text(result)
 
 def gen_test_content(topic, count, lang, with_img=False):
@@ -308,23 +309,34 @@ def gen_test_content(topic, count, lang, with_img=False):
     res=claude(
         f"Mavzu: {topic}\nSavollar: {count}\nTil: {ln}\n\n"
         f"{count} ta professional test savoli:{img_instruction}\n\n"
-        f"FORMAT:\nN. [Aniq, bir ma'noli savol]\n"
+        "FORMAT (faqat shu formatda yoz, boshqa hech narsa yozma):\n"
+        "N. [Aniq, bir ma'noli savol]\n"
         "A) [javob]\nB) [javob]\nC) [javob]\nD) [javob]\n"
         "To'g'ri javob: [harf]\n\n"
-        f"Darajalar: {count//3} oson, {count//3} o'rta, {count-2*(count//3)} qiyin\n"
-        "Har bir savol oldingi savoldan farq qilsin!",
-        f"Professional {ln} test yaratuvchi. Markdown belgisiz.",min(count*90,4000))
-    res=re2.sub(r'\*\*(.+?)\*\*',r'\1',res)
-    res=re2.sub(r'\*(.+?)\*',r'\1',res)
+        f"Darajalar: {count//3} ta oson, {count//3} ta o'rta, {count-2*(count//3)} ta qiyin\n"
+        "QATIY: Hech qanday **, *, #, ` belgisi ishlatilmasin. Imlo xatosiz yozilsin!",
+        f"Sen professional {ln} test yaratuvchisan. Faqat ilmiy va to'g'ri ma'lumotlar ishlatasan. "
+        f"Markdown belgisi ASLO ishlatmaysan. Imlo xatosiz yozasan.",
+        min(count*90, 4000))
+    res=re2.sub(r'\*\*(.+?)\*\*', r'\1', res)
+    res=re2.sub(r'\*(.+?)\*', r'\1', res)
+    res=re2.sub(r'#{1,6}\s*', '', res)
+    res=re2.sub(r'[`~]', '', res)
     return res
 
 def clean_ai_text(text):
     import re
-    text = re.sub(r'\*\*(.+?)\*\*', r'\\1', text, flags=re.DOTALL)
-    text = re.sub(r'\*(.+?)\*', r'\\1', text)
-    text = re.sub(r'#{1,6}\s+', '', text)
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text, flags=re.DOTALL)
+    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    text = re.sub(r'#{1,6}\s*', '', text)
+    text = re.sub(r'[`~]', '', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
+    lines = []
+    for line in text.split('\n'):
+        line = line.strip()
+        line = re.sub(r'^[-•►▸]+\s*', '', line)
+        lines.append(line)
+    return '\n'.join(lines).strip()
 
 def fix_spell(text, lang):
     ln=LN.get(lang,"o'zbek")
@@ -371,25 +383,33 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
             bar.fill.solid(); bar.fill.fore_color.rgb=acc; bar.line.fill.background()
         except: pass
         if sn==0:
-            tb=sl.shapes.add_textbox(Inches(1),Inches(1.3),Inches(11.33),Inches(3.0))
+            # 1-SLAYD: Faqat mavzu nomi va foydalanuvchi ma'lumotlari
+            tb=sl.shapes.add_textbox(Inches(1),Inches(1.5),Inches(11.33),Inches(2.5))
             tf=tb.text_frame; tf.word_wrap=True
-            p=tf.paragraphs[0]; p.text=title
-            p.font.size=Pt(44); p.font.bold=True; p.font.color.rgb=tc; p.alignment=PP_ALIGN.CENTER
-            info=build_info(ud)
-            if info:
-                tb2=sl.shapes.add_textbox(Inches(1),Inches(4.5),Inches(11.33),Inches(2.0))
-                tf2=tb2.text_frame; tf2.word_wrap=True
-                first=True
-                for ln_txt in info.split("\n"):
-                    p2=tf2.paragraphs[0] if first else tf2.add_paragraph(); first=False
-                    p2.text=ln_txt; p2.font.size=Pt(20); p2.font.color.rgb=txc; p2.alignment=PP_ALIGN.CENTER
+            p=tf.paragraphs[0]; p.text=topic
+            p.font.size=Pt(40); p.font.bold=True; p.font.color.rgb=tc; p.alignment=PP_ALIGN.CENTER
+            # Accent chiziq
             try:
-                tb3=sl.shapes.add_textbox(Inches(1),Inches(6.7),Inches(11.33),Inches(0.6))
-                tf3=tb3.text_frame
-                tf3.paragraphs[0].text=datetime.now().strftime("%Y-yil")
-                tf3.paragraphs[0].font.size=Pt(16); tf3.paragraphs[0].font.color.rgb=acc
-                tf3.paragraphs[0].alignment=PP_ALIGN.CENTER
+                sep=sl.shapes.add_shape(1,Inches(3),Inches(4.1),Inches(7.33),Inches(0.06))
+                sep.fill.solid(); sep.fill.fore_color.rgb=acc; sep.line.fill.background()
             except: pass
+            # Foydalanuvchi ma'lumotlari (muallif, universitet, fan, o'qituvchi va h.k.)
+            info_lines=[]
+            if ud.get("full_name"): info_lines.append(f"Muallif: {ud['full_name']}")
+            if ud.get("subject"): info_lines.append(f"Fan: {ud['subject']}")
+            if ud.get("university"): info_lines.append(f"Universitet: {ud['university']}")
+            if ud.get("faculty"): info_lines.append(f"Fakultet: {ud['faculty']}")
+            if ud.get("year"): info_lines.append(f"Kurs: {ud['year']}")
+            if ud.get("teacher"): info_lines.append(f"O'qituvchi: {ud['teacher']}")
+            if ud.get("city"): info_lines.append(f"Shahar: {ud['city']}")
+            info_lines.append(datetime.now().strftime("%Y-yil"))
+            if info_lines:
+                tb2=sl.shapes.add_textbox(Inches(1),Inches(4.3),Inches(11.33),Inches(2.8))
+                tf2=tb2.text_frame; tf2.word_wrap=True; first=True
+                for ln_txt in info_lines:
+                    p2=tf2.paragraphs[0] if first else tf2.add_paragraph(); first=False
+                    p2.text=ln_txt; p2.font.size=Pt(19); p2.font.color.rgb=txc
+                    p2.alignment=PP_ALIGN.CENTER; p2.space_before=Pt(4)
         elif sn==1 and ("REJA" in title.upper() or "PLAN" in title.upper() or "MUNDARIJA" in title.upper()):
             # 2-SLAYD: REJALAR - markazda katta, chiroyli
             # Sarlavha "REJALAR"
@@ -428,7 +448,7 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
             except: pass
             if bullets:
                 has_img=img_pages and any(img_pages.get(str(i))==sn+1 for i in range(len(user_imgs or [])))
-                has_ai_img = sn+1 in ud.get("ai_img_slides",[])
+                has_ai_img=sn+1 in ud.get("ai_img_slides",[])
                 txt_w=7.8 if (has_img or has_ai_img) else 12.5
                 tb2=sl.shapes.add_textbox(Inches(0.4),Inches(1.75),Inches(txt_w),Inches(5.5))
                 tf2=tb2.text_frame; tf2.word_wrap=True
@@ -464,40 +484,22 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
             try:
                 if slide_num-1 < len(slide_list):
                     sl2=slide_list[slide_num-1]
-                    # O'sha slaydning sarlavhasini topish
                     slide_title=topic
                     for sh in sl2.shapes:
                         if sh.has_text_frame and sh.text_frame.paragraphs:
                             t=sh.text_frame.paragraphs[0].text.strip()
                             if t and len(t)>2: slide_title=t; break
-                    
-                    # Shu slaydga mos so'z bilan internet rasm qidirish
-                    img_query = f"{topic} {slide_title}".strip()[:60]
-                    img_buf = get_unsplash_image(img_query)
-                    
-                    # Agar internet rasm kelmasa, PIL bilan yaratish
+                    # Shu slayd mavzusiga mos internetdan rasm olish
+                    img_query=f"{topic} {slide_title}".strip()[:60]
+                    img_buf=get_unsplash_image(img_query)
                     if not img_buf:
-                        img_buf = create_slide_image(topic, slide_title, tmpl_id_for_img)
-                    
+                        img_buf=create_slide_image(topic,slide_title,tmpl_id_for_img)
                     if img_buf:
-                        # Matn o'ng tomonda bo'lishi uchun: rasm PASTKI o'ng burchakka, kichikroq
-                        # Slayd: 13.33 x 7.5 inch
-                        # Rasm o'rni: o'ng pastda, matnni to'smaydigan joy
+                        # O'ng pastki burchakda, matnni to'smaydigan joy
                         sl2.shapes.add_picture(
                             img_buf,
-                            Inches(8.6), Inches(1.7),   # chap, yuqori
-                            Inches(4.5), Inches(3.8))   # kenglik, balandlik
-                        
-                        # Matn qutisini chegaralash (agar allaqachon qo'shilgan bo'lsa)
-                        for shp in sl2.shapes:
-                            if shp.has_text_frame and shp != sl2.shapes[0]:
-                                try:
-                                    # Matn o'ng tomoniga chiqmasligi uchun kenglikni kamaytirish
-                                    if float(shp.left)/914400 < 4 and float(shp.width)/914400 > 8:
-                                        from pptx.util import Inches as In2
-                                        shp.width = In2(8.0)
-                                except: pass
-                        
+                            Inches(8.6), Inches(1.7),
+                            Inches(4.5), Inches(3.8))
                         logger.info(f"Rasm qo'shildi slayd {slide_num}: {img_query}")
             except Exception as ie:
                 logger.error(f"AI img slide {slide_num}: {ie}")
@@ -707,28 +709,14 @@ def k2l(t):
     return r
 
 ST,UD,UI,HIST={},{},{},{}
-
-# Orqaga tugmasi uchun holat tarixi
 BACK_HISTORY={}
 
-STATE_ORDER=[
-    "referat_t","referat_p","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","referat_lang",
-    "kurs_t","kurs_p","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","kurs_lang",
-    "mustaqil_t","mustaqil_p","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","mustaqil_lang",
-    "maqola_t","maqola_p","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","maqola_lang",
-    "prez_t","prez_sl","prez_plans","ask_name","ask_univ","ask_faculty","ask_year","ask_teacher","ask_city","prez_tmpl","prez_lang",
-    "test_t","test_cnt",
-]
-
 def sst(uid,s,**kw):
-    # Oldingi holatni tarixga qo'shish
     prev=ST.get(uid)
     if prev and prev!=s:
-        if uid not in BACK_HISTORY:
-            BACK_HISTORY[uid]=[]
-        BACK_HISTORY[uid].append(prev)
-        if len(BACK_HISTORY[uid])>15:
-            BACK_HISTORY[uid]=BACK_HISTORY[uid][-15:]
+        BACK_HISTORY.setdefault(uid,[]).append(prev)
+        if len(BACK_HISTORY[uid])>20:
+            BACK_HISTORY[uid]=BACK_HISTORY[uid][-20:]
     ST[uid]=s; UD.setdefault(uid,{}).update(kw)
     try: save_order(uid,s,UD.get(uid,{}))
     except: pass
@@ -739,21 +727,20 @@ def cst(uid):
     ST.pop(uid,None); BACK_HISTORY.pop(uid,None); clear_order(uid)
 
 def go_back(uid):
-    """Oldingi holatga qaytish"""
     history=BACK_HISTORY.get(uid,[])
-    if not history:
-        return None
-    prev_state=history.pop()
+    if not history: return None
+    prev=history.pop()
     BACK_HISTORY[uid]=history
-    ST[uid]=prev_state
-    return prev_state
+    ST[uid]=prev
+    return prev
 
 INFO_STEPS=[
     ("ask_name","full_name","👤 Ism va familiyangizni kiriting:",True),
-    ("ask_univ","university","🏛 Universiteti nomi:",True),
-    ("ask_faculty","faculty","📚 Fakulteti:",False),
+    ("ask_univ","university","🏛 Universitetingiz nomi:",True),
+    ("ask_faculty","faculty","📚 Fakultetingiz:",False),
     ("ask_year","year","📅 Nechinchi kurs?:",False),
     ("ask_teacher","teacher","👩‍🏫 O'qituvchi ismi:",False),
+    ("ask_subject","subject","📖 Fan nomi (masalan: Iqtisodiyot):",False),
     ("ask_city","city","🏙 Shahar:",False),
 ]
 INFO_STATES=[s[0] for s in INFO_STEPS]
