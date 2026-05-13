@@ -422,7 +422,7 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
         else:
             tb=sl.shapes.add_textbox(Inches(0.4),Inches(0.2),Inches(12.53),Inches(1.2))
             tf=tb.text_frame; tf.word_wrap=True
-            p=tf.paragraphs[0]; p.text=title[:80]
+            p=tf.paragraphs[0]; p.text=topic[:80]
             p.font.size=Pt(30); p.font.bold=True; p.font.color.rgb=tc
             try:
                 ln2=sl.shapes.add_shape(1,Inches(0.4),Inches(1.55),Inches(12.53),Inches(0.07))
