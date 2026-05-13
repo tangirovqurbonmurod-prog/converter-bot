@@ -284,37 +284,10 @@ def get_unsplash_image(query):
     except Exception as e: logger.warning(f"Unsplash xato: {e}")
     return None
 
-def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
-    ln=LN.get(lang,"o'zbek"); info=build_info(ud)
-    slides_per_plan=max(1,(slides-2)//plans_count)
-    subject_info=f"\nFan: {ud['subject']}" if ud.get('subject') else ""
-    result=claude(
-        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nUslub: {tmpl_name}\n{info}{subject_info}\n"
-        f"Rejalar soni: {plans_count}\n\n"
-        "MUHIM: Quyidagi FORMAT ga QATIY AMAL QILINSIN:\n"
-        "SLAYD 1: [mavzu nomi]\n"
-        "SLAYD 2: REJALAR\n"
-        "1. [birinchi reja]\n2. [ikkinchi reja]\n...\n"
-        "SLAYD 3: [birinchi reja sarlavhasi]\n"
-        "[4-6 ta aniq fakt va raqam]\n"
-        "SLAYD 4: [ikkinchi reja sarlavhasi]\n"
-        "[4-6 ta aniq fakt va raqam]\n"
-        f"...\nSLAYD {slides}: XULOSA VA ADABIYOTLAR\n"
-        "[xulosa va 5-7 adabiyot]\n\n"
-        "QOIDALAR:\n"
-        "1. Har slayd SLAYD N: bilan boshlansin - BU MAJBURIY!\n"
-        "2. Hech qanday **, ##, *, # belgisi yo'q\n"
-        "3. Har slaydda 4-6 ta aniq raqam va fakt\n"
-        "4. Faqat ilmiy manbalardan\n"
-        "5. Imlo 100% to'g'ri\n"
-        f"6. Jami {slides} ta slayd bo'lsin\n"
-        "INFOGRAFIKA (1-2 slaydda):\n"
-        "INFOGRAFIKA: [sarlavha]: [kalit1]: [qiymat1], [kalit2]: [qiymat2]",
-        f"Sen professional {ln} prezentatsiya mutaxassisisan. "
-        "SLAYD N: formatini qat'iy ushla. Markdown ishlatma. Imlo xatosiz.",
-        4000)
+def gen_prez_content(topic,slides,tmpl_name,lang,ud={},plans_count=5):
+    ln=LN.get(lang,"o'zbek");info=build_info(ud)
+    result=claude(f"Mavzu:{topic}\nSlaydlar:{slides}\n\nHar slayd SLAYD N: bilan boshlansin!\nSLAYD 1:{topic}\nSLAYD 2:REJALAR\n{plans_count} ta reja\nSLAYD 3-{slides-1}: har slayd o'z sarlavhasi\nSLAYD {slides}:Xulosa\n\nQoida: SLAYD N: majburiy! Imlo xatosiz!","Professional prezentatsiya. SLAYD N: format qatiy.",4000)
     return clean_ai_text(result)
-
 def gen_test_content(topic, count, lang, with_img=False):
     ln=LN.get(lang,"o'zbek")
     img_instruction="" if not with_img else (
