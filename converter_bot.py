@@ -127,12 +127,11 @@ def get_stats():
 
 def claude(prompt,system="",max_tok=4000,model=None):
     if not CLAUDE_API_KEY: return "Claude API sozlanmagan!"
-    if model is None: model=HAIKU_MODEL
     try:
         r=requests.post("https://api.anthropic.com/v1/messages",
             headers={"x-api-key":CLAUDE_API_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},
-            json={"model":model,"max_tokens":max_tok,"system":system,"messages":[{"role":"user","content":prompt}]},
-            timeout=180)
+            json={"model":model or "claude-haiku-4-5-20251001","max_tokens":max_tok,"system":system,"messages":[{"role":"user","content":prompt}]},
+            timeout=120)
         return r.json()["content"][0]["text"] if r.status_code==200 else f"API xatosi:{r.status_code}"
     except Exception as e: return f"Xatolik:{e}"
 
@@ -153,20 +152,11 @@ def gen_text(svc,topic,pages,lang,ud={}):
     }
     struct=structs.get(svc,structs["referat"])
     names={"referat":"referat","kurs":"kurs ishi","mustaqil":"mustaqil ish","maqola":"ilmiy maqola"}
-    subject_info=f"\nFan: {ud['subject']}" if ud.get('subject') else ""
-    use_model=SONNET_MODEL if svc in ("kurs","maqola") else HAIKU_MODEL
     res=claude(
-        f"Mavzu: {topic}\nHajm: {pages} bet ({pages*wpg}+ so'z)\n{info}{subject_info}\n\n"
+        f"Mavzu: {topic}\nHajm: {pages} bet ({pages*wpg}+ so'z)\n{info}\n\n"
         f"{ln} tilida TO'LIQ {names.get(svc,'hujjat')} yozing:\n{struct}\n\n"
-        "QATIY TALABLAR:\n"
-        "1. Faqat ilmiy kitoblar va tasdiqlangan manbalardan ma'lumot\n"
-        "2. Har bo'limda aniq faktlar, raqamlar, foizlar bo'lsin\n"
-        "3. Hech qanday **, *, #, ` belgilari ISHLATILMASIN\n"
-        "4. Imlo va grammatika 100% to'g'ri\n"
-        "5. Oxirida FOYDALANILGAN ADABIYOTLAR bo'limi bo'lsin",
-        f"Sen {ln} tilida eng professional akademik yozuvchisan. "
-        f"Faqat ilmiy manbalar. Markdown belgisi ASLO ishlatma. Imlo xatosiz.",
-        4000, model=use_model)
+        "MUHIM: Har bo'limni to'liq, faktlar va misollar bilan yoz. Qisqartirma!",
+        f"Professional {ln} akademik yozuvchi. To'liq, ilmiy, imlo xatosiz.",4000)
     return clean_ai_text(res)
 
 TEMPLATES={
@@ -292,47 +282,37 @@ def get_unsplash_image(query):
         if r2.status_code==200 and len(r2.content)>5000:
             buf2=BytesIO(r2.content); buf2.seek(0); return buf2
     except Exception as e: logger.warning(f"Unsplash xato: {e}")
-    try:
-        import hashlib
-        seed2=int(hashlib.md5(query.encode()).hexdigest()[:8],16)%9999
-        r3=requests.get(f"https://picsum.photos/seed/{seed2}/800/500",timeout=10,allow_redirects=True)
-        if r3.status_code==200 and len(r3.content)>5000:
-            buf3=BytesIO(r3.content); buf3.seek(0); return buf3
-    except: pass
     return None
 
 def gen_prez_content(topic, slides, tmpl_name, lang, ud={}, plans_count=5):
     ln=LN.get(lang,"o'zbek"); info=build_info(ud)
-    content_slides=slides-2
-    slides_per_plan=max(1,content_slides//plans_count)
+    slides_per_plan=max(1,(slides-2)//plans_count)
     subject_info=f"\nFan: {ud['subject']}" if ud.get('subject') else ""
     result=claude(
         f"Mavzu: {topic}\nSlaydlar soni: {slides}\nUslub: {tmpl_name}\n{info}{subject_info}\n"
         f"Rejalar soni: {plans_count}\n\n"
-        "MUHIM FORMAT - AYNAN SHUNDAY YOZILSIN:\n"
+        "MUHIM: Quyidagi FORMAT ga QATIY AMAL QILINSIN:\n"
         "SLAYD 1: [mavzu nomi]\n"
-        "[1-slayd uchun hech narsa yozma]\n"
         "SLAYD 2: REJALAR\n"
-        "[rejalar ro'yxati]\n"
+        "1. [birinchi reja]\n2. [ikkinchi reja]\n...\n"
         "SLAYD 3: [birinchi reja sarlavhasi]\n"
-        "[mazmun]\n"
-        "... va hokazo\n\n"
+        "[4-6 ta aniq fakt va raqam]\n"
+        "SLAYD 4: [ikkinchi reja sarlavhasi]\n"
+        "[4-6 ta aniq fakt va raqam]\n"
+        f"...\nSLAYD {slides}: XULOSA VA ADABIYOTLAR\n"
+        "[xulosa va 5-7 adabiyot]\n\n"
         "QOIDALAR:\n"
-        "1. Har slayd SLAYD N: bilan boshlansin - bu MAJBURIY\n"
-        "2. Hech qanday **, ##, *, # belgisi ISHLATILMASIN\n"
-        "3. Har slaydda 4-6 ta aniq fakt va raqam bo'lsin\n"
-        "4. Faqat ilmiy kitoblardan ma'lumot\n"
-        f"5. SLAYD 1: faqat mavzu nomi - boshqa hech narsa yo'q\n"
-        f"6. SLAYD 2: sarlavha REJALAR - {plans_count} ta bo'lim raqamlangan\n"
-        f"7. SLAYD 3-{slides-1}: har slayd o'z sarlavhasi va mazmuni\n"
-        f"8. SLAYD {slides}: Xulosa va Foydalanilgan adabiyotlar\n"
-        "9. INFOGRAFIKA qo'shish (1-2 ta slaydda):\n"
-        "   INFOGRAFIKA: [sarlavha]: [kalit1]: [qiymat1], [kalit2]: [qiymat2]\n"
-        "10. Imlo 100% to'g'ri bo'lsin\n\n"
-        f"Barcha {slides} ta slaydni to'liq yoz!",
+        "1. Har slayd SLAYD N: bilan boshlansin - BU MAJBURIY!\n"
+        "2. Hech qanday **, ##, *, # belgisi yo'q\n"
+        "3. Har slaydda 4-6 ta aniq raqam va fakt\n"
+        "4. Faqat ilmiy manbalardan\n"
+        "5. Imlo 100% to'g'ri\n"
+        f"6. Jami {slides} ta slayd bo'lsin\n"
+        "INFOGRAFIKA (1-2 slaydda):\n"
+        "INFOGRAFIKA: [sarlavha]: [kalit1]: [qiymat1], [kalit2]: [qiymat2]",
         f"Sen professional {ln} prezentatsiya mutaxassisisan. "
-        f"SLAYD N: formatini qat'iy ushla. Markdown ishlatma. Imlo xatosiz.",
-        4000, model=SONNET_MODEL)
+        "SLAYD N: formatini qat'iy ushla. Markdown ishlatma. Imlo xatosiz.",
+        4000)
     return clean_ai_text(result)
 
 def gen_test_content(topic, count, lang, with_img=False):
@@ -418,9 +398,9 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
             tb=sl.shapes.add_textbox(Inches(1),Inches(1.2),Inches(11.33),Inches(2.5))
             tf=tb.text_frame; tf.word_wrap=True
             p=tf.paragraphs[0]; p.text=topic
-            p.font.size=Pt(38); p.font.bold=True; p.font.color.rgb=tc; p.alignment=PP_ALIGN.CENTER
+            p.font.size=Pt(36); p.font.bold=True; p.font.color.rgb=tc; p.alignment=PP_ALIGN.CENTER
             try:
-                sep=sl.shapes.add_shape(1,Inches(3),Inches(4.0),Inches(7.33),Inches(0.06))
+                sep=sl.shapes.add_shape(1,Inches(3),Inches(3.9),Inches(7.33),Inches(0.06))
                 sep.fill.solid(); sep.fill.fore_color.rgb=acc; sep.line.fill.background()
             except: pass
             info_lines=[]
@@ -432,7 +412,7 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
             if ud.get("teacher"): info_lines.append(f"O'qituvchi: {ud['teacher']}")
             if ud.get("city"): info_lines.append(f"Shahar: {ud['city']}")
             info_lines.append(datetime.now().strftime("%Y-yil"))
-            tb2=sl.shapes.add_textbox(Inches(1),Inches(4.2),Inches(11.33),Inches(2.8))
+            tb2=sl.shapes.add_textbox(Inches(1),Inches(4.1),Inches(11.33),Inches(2.8))
             tf2=tb2.text_frame; tf2.word_wrap=True; first2=True
             for ln_txt in info_lines:
                 p2=tf2.paragraphs[0] if first2 else tf2.add_paragraph(); first2=False
@@ -516,15 +496,13 @@ def make_pptx_pro(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None
                         if sh.has_text_frame and sh.text_frame.paragraphs:
                             t=sh.text_frame.paragraphs[0].text.strip()
                             if t and len(t)>3 and t!=topic: slide_title=t; break
-                    img_query=f"{slide_title} {topic}"[:60]
-                    img_buf=get_unsplash_image(img_query)
+                    img_buf=get_unsplash_image(f"{slide_title} {topic}"[:60])
                     if not img_buf: img_buf=create_slide_image(topic,slide_title,tmpl_id_for_img)
                     if img_buf:
                         if slide_num%2==0:
-                            sl2.shapes.add_picture(img_buf,Inches(0.4),Inches(1.7),Inches(12.5),Inches(3.5))
+                            sl2.shapes.add_picture(img_buf,Inches(0.4),Inches(1.7),Inches(12.5),Inches(3.2))
                         else:
-                            sl2.shapes.add_picture(img_buf,Inches(8.6),Inches(1.7),Inches(4.5),Inches(3.8))
-                        logger.info(f"Rasm slayd {slide_num}: {img_query}")
+                            sl2.shapes.add_picture(img_buf,Inches(8.6),Inches(1.7),Inches(4.5),Inches(3.5))
             except Exception as ie:
                 logger.error(f"AI img slide {slide_num}: {ie}")
 
@@ -743,11 +721,10 @@ def cst(uid):
 
 INFO_STEPS=[
     ("ask_name","full_name","👤 Ism va familiyangizni kiriting:",True),
-    ("ask_univ","university","🏛 Universitetingiz nomi:",True),
-    ("ask_faculty","faculty","📚 Fakultetingiz:",False),
+    ("ask_univ","university","🏛 Universiteti nomi:",True),
+    ("ask_faculty","faculty","📚 Fakulteti:",False),
     ("ask_year","year","📅 Nechinchi kurs?:",False),
     ("ask_teacher","teacher","👩‍🏫 O'qituvchi ismi:",False),
-    ("ask_subject","subject","📖 Fan nomi (masalan: Iqtisodiyot):",False),
     ("ask_city","city","🏙 Shahar:",False),
 ]
 INFO_STATES=[s[0] for s in INFO_STEPS]
@@ -920,73 +897,6 @@ def done_cmd(msg):
     try: bot.delete_message(uid,pm.message_id)
     except: pass
     bot.send_message(uid,"✅",reply_markup=main_kb(uid))
-
-
-@bot.message_handler(commands=["referat"])
-def cmd_referat(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    sst(uid,"referat_t",svc="referat"); bot.send_message(uid,"📄 Mavzuni kiriting:",reply_markup=bk_kb())
-
-@bot.message_handler(commands=["kursishi"])
-def cmd_kurs(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    sst(uid,"kurs_t",svc="kurs"); bot.send_message(uid,"📝 Mavzuni kiriting:",reply_markup=bk_kb())
-
-@bot.message_handler(commands=["mustaqilish"])
-def cmd_mustaqil(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    sst(uid,"mustaqil_t",svc="mustaqil"); bot.send_message(uid,"📋 Mavzuni kiriting:",reply_markup=bk_kb())
-
-@bot.message_handler(commands=["maqola"])
-def cmd_maqola(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    sst(uid,"maqola_t",svc="maqola"); bot.send_message(uid,"📰 Mavzuni kiriting:",reply_markup=bk_kb())
-
-@bot.message_handler(commands=["prezentatsiya"])
-def cmd_prez(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    sst(uid,"prez_t",svc="prez"); bot.send_message(uid,"📊 Mavzuni kiriting:",reply_markup=bk_kb())
-
-@bot.message_handler(commands=["test"])
-def cmd_test(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    sst(uid,"test_t",svc="test"); bot.send_message(uid,"✅ Mavzuni kiriting:",reply_markup=bk_kb())
-
-@bot.message_handler(commands=["imlo"])
-def cmd_imlo(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    sst(uid,"imlo_t")
-    kb2=types.InlineKeyboardMarkup()
-    kb2.add(types.InlineKeyboardButton("📁 Fayl yuborish",callback_data="imlo_file"))
-    bot.send_message(uid,"✏️ Matnni yozing:",reply_markup=kb2)
-
-@bot.message_handler(commands=["konvertatsiya"])
-def cmd_conv(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    bot.send_message(uid,"🔄 Format tanlang:",reply_markup=conv_kb())
-
-@bot.message_handler(commands=["balans"])
-def cmd_balans(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    bal=get_balance(uid); kb2=types.InlineKeyboardMarkup()
-    kb2.add(types.InlineKeyboardButton("💳 Balans to'ldirish",callback_data="topup"))
-    bot.send_message(uid,f"💰 *Balansingiz: {bal:,} so'm*",parse_mode="Markdown",reply_markup=kb2)
-
-@bot.message_handler(commands=["yordam","help"])
-def cmd_help(msg):
-    uid=msg.from_user.id
-    bot.send_message(uid,
-        f"❓ *Buyruqlar:*\n/referat /kursishi /mustaqilish /maqola\n"
-        f"/prezentatsiya /test /imlo /konvertatsiya /balans\n\n"
-        f"💵 *Narxlar:*\n📄 {PRICE_PAGE:,}/bet | 📝 {PRICE_KURS:,}/bet\n"
-        f"📋 {PRICE_MUSTAQIL:,}/bet | 📰 {PRICE_MAQOLA:,}/bet\n"
-        f"📊 {PRICE_SLIDE:,}/slayd | ✅ {PRICE_TEST:,}/savol",
-        parse_mode="Markdown",reply_markup=main_kb(uid))
-
-@bot.message_handler(commands=["menu"])
-def cmd_menu(msg):
-    uid=msg.from_user.id; reg_user(uid,msg.from_user.username or "",msg.from_user.first_name or "")
-    bot.send_message(uid,"📋 Asosiy menyu:",reply_markup=main_kb(uid))
 
 @bot.message_handler(content_types=["photo"])
 def photo_h(msg):
@@ -1359,7 +1269,6 @@ def cb_h(call):
                     with open(op,"rb") as f: bot.send_document(uid,f,caption=f"🌐 {topic} (HTML - brauzerda oching)")
                     shutil.rmtree(td2,ignore_errors=True)
             log_act(uid,"prez",topic,total)
-            save_buyurtma(uid,"prez",topic,fmt,ud.get("slides",0),total)
         except Exception as e:
             logger.error(f"Prez:{e}"); add_bal(uid,total); bot.send_message(uid,"❌ Xatolik. Pul qaytarildi.")
         cst(uid); UI.pop(uid,None)
@@ -1397,7 +1306,6 @@ def cb_h(call):
                     with open(op,"rb") as f: bot.send_document(uid,f,caption=f"📄 {title}")
                     shutil.rmtree(td2,ignore_errors=True)
             log_act(uid,svc,topic,total)
-            save_buyurtma(uid,svc,topic,fmt,ud.get("pages",0),total)
         except Exception as e:
             logger.error(f"Gen:{e}"); add_bal(uid,total); bot.send_message(uid,"❌ Xatolik. Pul qaytarildi.")
         cst(uid); bot.send_message(uid,f"✅ Tayyor! Balans: {get_balance(uid):,} so'm",reply_markup=main_kb(uid))
@@ -1423,7 +1331,6 @@ def cb_h(call):
                     with open(op,"rb") as f: bot.send_document(uid,f,caption=f"{cap} Test: {topic}")
                     shutil.rmtree(td2,ignore_errors=True)
             log_act(uid,"test",topic,total)
-            save_buyurtma(uid,"test",topic,fmt,ud.get("count",0),total)
         except Exception as e:
             logger.error(f"Test:{e}"); add_bal(uid,total); bot.send_message(uid,"❌ Xatolik. Pul qaytarildi.")
         cst(uid); bot.send_message(uid,f"✅ Tayyor! Balans: {get_balance(uid):,} so'm",reply_markup=main_kb(uid))
@@ -1538,21 +1445,5 @@ def cb_h(call):
 
 if __name__=="__main__":
     init_db()
-    try:
-        bot.set_my_commands([
-            types.BotCommand("start","Botni ishga tushirish"),
-            types.BotCommand("referat","Referat yozish"),
-            types.BotCommand("kursishi","Kurs ishi yozish"),
-            types.BotCommand("mustaqilish","Mustaqil ish yozish"),
-            types.BotCommand("maqola","Ilmiy maqola yozish"),
-            types.BotCommand("prezentatsiya","Prezentatsiya yaratish"),
-            types.BotCommand("test","Test savollari yaratish"),
-            types.BotCommand("imlo","Imlo tuzatish"),
-            types.BotCommand("konvertatsiya","Fayl konvertatsiya"),
-            types.BotCommand("balans","Balansni ko'rish"),
-            types.BotCommand("yordam","Yordam va narxlar"),
-            types.BotCommand("menu","Asosiy menyuni ochish"),
-        ])
-    except Exception as e: logger.error(f"Commands: {e}")
-    print("EduBot v9 ishga tushdi!")
+    print("EduBot v10 ishga tushdi!")
     bot.infinity_polling()
