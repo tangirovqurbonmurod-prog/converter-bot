@@ -1,0 +1,5 @@
+telebot 
+requests 
+python-pptx 
+reportlab 
+Pillow 
