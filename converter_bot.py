@@ -564,6 +564,276 @@ def build_info(ud):
         if ud.get(k): parts.append(f"{lbl}: {ud[k]}")
     return "\n".join(parts)
 
+
+# ============================================================
+# DIAGRAMMA MODULI
+# ============================================================
+# ============================================================
+# DIAGRAMMA VA INFOGRAFIKA MODULI
+# Mavzuga qarab avtomatik diagramma qo'yadi
+# ============================================================
+from pptx.util import Inches, Pt, Emu
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
+from pptx.chart.data import ChartData
+from pptx import Presentation
+from pptx.enum.chart import XL_CHART_TYPE
+import re, json
+
+def rgb(r,g,b): return RGBColor(r,g,b)
+
+# ============================================================
+# DIAGRAMMA KERAKMI TEKSHIRISH
+# ============================================================
+DIAGRAM_KEYWORDS = {
+    "bar_chart": [
+        "iqtisod","statistik","o'sish","pasayish","daromad","ishlab chiqarish",
+        "eksport","import","yalpi","GDP","BYM","foiz","%","million","milliard",
+        "экономика","рост","снижение","доход","производство","экспорт",
+        "economic","growth","decline","revenue","production","export","import",
+        "miqdor","hajm","ko'rsatkich","natija","taqqoslash"
+    ],
+    "pie_chart": [
+        "ulush","taqsimot","tarkib","qism","struktura","nisbat",
+        "доля","распределение","структура","часть",
+        "share","distribution","structure","portion","percentage",
+        "foiz ulushi","qancha qism","nechta"
+    ],
+    "line_chart": [
+        "dinamika","trend","vaqt","yil","oy","davr","o'zgarish","rivojlanish",
+        "динамика","тренд","время","год","месяц","период","изменение",
+        "timeline","trend","period","change","development","history",
+        "tarix","o'tgan","kelajak","prognoz"
+    ],
+    "infographic": [
+        "bosqich","jarayon","ketma-ket","qadamlar","sxema","algoritm",
+        "этап","процесс","шаг","схема","алгоритм",
+        "step","process","stage","flow","scheme","algorithm",
+        "anatomiya","tuzilish","qism","element"
+    ]
+}
+
+def detect_diagram_type(topic, slide_title, slide_text):
+    """Mavzu va matnga qarab diagramma turini aniqlash"""
+    combined = f"{topic} {slide_title} {slide_text}".lower()
+    
+    scores = {"bar_chart": 0, "pie_chart": 0, "line_chart": 0, "infographic": 0, "none": 0}
+    
+    for dtype, keywords in DIAGRAM_KEYWORDS.items():
+        for kw in keywords:
+            if kw.lower() in combined:
+                scores[dtype] += 1
+    
+    max_type = max(scores, key=scores.get)
+    max_score = scores[max_type]
+    
+    if max_score == 0:
+        return "none"
+    return max_type
+
+def parse_diagram_data(claude_text):
+    """Claude matntidan diagramma ma'lumotlarini ajratish"""
+    # Format: [ДИАГРАММА: nomi | label1:val1, label2:val2, ...]
+    pattern = r'\[(?:ДИАГРАММА|DIAGRAMMA|CHART|INFOGRAFIKA):\s*([^\|]+)\|([^\]]+)\]'
+    matches = re.findall(pattern, claude_text, re.IGNORECASE)
+    
+    results = []
+    for title, data_str in matches:
+        entries = []
+        for item in data_str.split(','):
+            item = item.strip()
+            if ':' in item:
+                parts = item.split(':')
+                label = parts[0].strip()
+                try:
+                    val = float(parts[1].strip().replace('%','').replace(',','.'))
+                    entries.append((label, val))
+                except: pass
+        if entries:
+            results.append({"title": title.strip(), "data": entries})
+    return results
+
+# ============================================================
+# DIAGRAMMA CHIZISH FUNKSIYALARI
+# ============================================================
+
+def add_bar_chart(sl, data, title, x, y, w, h, accent_color):
+    """Ustunli diagramma qo'shish"""
+    try:
+        from pptx.chart.data import ChartData
+        from pptx.enum.chart import XL_CHART_TYPE
+        
+        chart_data = ChartData()
+        chart_data.categories = [d[0] for d in data[:8]]
+        chart_data.add_series(title, [d[1] for d in data[:8]])
+        
+        chart = sl.shapes.add_chart(
+            XL_CHART_TYPE.COLUMN_CLUSTERED,
+            Inches(x), Inches(y), Inches(w), Inches(h),
+            chart_data
+        ).chart
+        
+        # Rang berish
+        try:
+            plot = chart.plots[0]
+            series = plot.series[0]
+            fill = series.format.fill
+            fill.solid()
+            fill.fore_color.rgb = accent_color
+        except: pass
+        
+        # Sarlavha
+        try:
+            chart.has_title = True
+            chart.chart_title.text_frame.text = title
+            chart.chart_title.text_frame.paragraphs[0].font.size = Pt(11)
+            chart.chart_title.text_frame.paragraphs[0].font.bold = True
+        except: pass
+        
+        # Legend o'chirish
+        try: chart.has_legend = False
+        except: pass
+        
+        return True
+    except Exception as e:
+        return False
+
+def add_pie_chart(sl, data, title, x, y, w, h, accent_color):
+    """Doiraviy diagramma qo'shish"""
+    try:
+        from pptx.chart.data import ChartData
+        from pptx.enum.chart import XL_CHART_TYPE
+        
+        chart_data = ChartData()
+        chart_data.categories = [d[0] for d in data[:6]]
+        chart_data.add_series(title, [d[1] for d in data[:6]])
+        
+        chart = sl.shapes.add_chart(
+            XL_CHART_TYPE.PIE,
+            Inches(x), Inches(y), Inches(w), Inches(h),
+            chart_data
+        ).chart
+        
+        try:
+            chart.has_title = True
+            chart.chart_title.text_frame.text = title
+            chart.chart_title.text_frame.paragraphs[0].font.size = Pt(11)
+        except: pass
+        
+        try:
+            chart.has_legend = True
+            chart.legend.position = 2  # bottom
+            chart.legend.include_in_layout = False
+        except: pass
+        
+        return True
+    except: return False
+
+def add_line_chart(sl, data, title, x, y, w, h, accent_color):
+    """Chiziqli diagramma (trend)"""
+    try:
+        from pptx.chart.data import ChartData
+        from pptx.enum.chart import XL_CHART_TYPE
+        
+        chart_data = ChartData()
+        chart_data.categories = [d[0] for d in data[:10]]
+        chart_data.add_series(title, [d[1] for d in data[:10]])
+        
+        chart = sl.shapes.add_chart(
+            XL_CHART_TYPE.LINE,
+            Inches(x), Inches(y), Inches(w), Inches(h),
+            chart_data
+        ).chart
+        
+        try:
+            chart.has_title = True
+            chart.chart_title.text_frame.text = title
+            chart.chart_title.text_frame.paragraphs[0].font.size = Pt(11)
+        except: pass
+        
+        try:
+            series = chart.plots[0].series[0]
+            series.format.line.color.rgb = accent_color
+            series.format.line.width = Pt(2.5)
+        except: pass
+        
+        return True
+    except: return False
+
+def add_simple_bar_infographic(sl, data, title, x, y, w, h, accent_color, text_color):
+    """Oddiy chiziqli infografika (chart kutubxonasisiz)"""
+    try:
+        max_val = max(d[1] for d in data) if data else 1
+        bar_h = 0.3
+        spacing = 0.45
+        title_tb = sl.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(0.35))
+        tf = title_tb.text_frame
+        p = tf.paragraphs[0]
+        p.text = title
+        p.font.size = Pt(11); p.font.bold = True; p.font.color.rgb = text_color
+        
+        for i, (label, val) in enumerate(data[:6]):
+            bar_y = y + 0.4 + i * spacing
+            bar_w = (val / max_val) * (w - 2.5) if max_val > 0 else 0.1
+            
+            # Label
+            label_tb = sl.shapes.add_textbox(Inches(x), Inches(bar_y), Inches(2.2), Inches(bar_h))
+            lp = label_tb.text_frame.paragraphs[0]
+            lp.text = label[:20]; lp.font.size = Pt(10); lp.font.color.rgb = text_color
+            
+            # Bar
+            if bar_w > 0.05:
+                bar = sl.shapes.add_shape(1, Inches(x+2.3), Inches(bar_y+0.03), Inches(bar_w), Inches(bar_h-0.08))
+                bar.fill.solid(); bar.fill.fore_color.rgb = accent_color; bar.line.fill.background()
+            
+            # Value
+            val_tb = sl.shapes.add_textbox(Inches(x+2.4+bar_w), Inches(bar_y), Inches(0.8), Inches(bar_h))
+            vp = val_tb.text_frame.paragraphs[0]
+            vp.text = f"{val:.1f}"; vp.font.size = Pt(10); vp.font.color.rgb = text_color
+        
+        return True
+    except: return False
+
+# ============================================================
+# ASOSIY DIAGRAMMA QO'SHISH FUNKSIYASI
+# ============================================================
+
+def add_diagram_to_slide(sl, topic, slide_title, slide_text, diagram_data, 
+                          accent_color, text_color, has_image=False):
+    """Slaydga diagramma qo'shish"""
+    if not diagram_data:
+        return False
+    
+    d = diagram_data[0]
+    title = d["title"]
+    data = d["data"]
+    
+    if not data:
+        return False
+    
+    # Joy hisoblash
+    if has_image:
+        x, y, w, h = 0.4, 4.2, 7.5, 2.8
+    else:
+        x, y, w, h = 0.4, 4.0, 12.5, 3.0
+    
+    dtype = detect_diagram_type(topic, slide_title, slide_text)
+    
+    # Avval python-pptx chart bilan sinab ko'ramiz
+    success = False
+    if dtype == "pie_chart" and len(data) >= 2:
+        success = add_pie_chart(sl, data, title, x, y, w, h, accent_color)
+    elif dtype == "line_chart" and len(data) >= 2:
+        success = add_line_chart(sl, data, title, x, y, w, h, accent_color)
+    
+    if not success:
+        # Fallback: oddiy chiziqli infografika
+        success = add_simple_bar_infographic(sl, data, title, x, y, w, h, accent_color, text_color)
+    
+    return success
+
+
+
 # ============================================================
 # CLAUDE API
 # ============================================================
@@ -655,13 +925,26 @@ def gen_prez(topic, slides, lang, ud={}, plans=5):
         f"SLAYD {slides}: Xulosa va tavsiyalar\n"
         f"[Barcha mavzular bo'yicha xulosalar. Amaliy tavsiyalar. Foydalanilgan adabiyotlar ro'yxati. 250+ so'z]"
     )
+    # Diagramma ko'rsatmasi
+    diagram_instruction = (
+        f"\n\nDIAGRAMMA TALABI:\n"
+        f"Mavzuga mos bo'lsa (statistika, iqtisod, biologiya, tibbiyot, fizika, kimyo va h.k.) "
+        f"BA'ZI slaydlarda diagramma ma'lumotlarini QUYIDAGI FORMATDA qo'shing:\n"
+        f"[DIAGRAMMA: sarlavha | yil1/nom1:raqam1, yil2/nom2:raqam2, ...]\n"
+        f"Masalan: [DIAGRAMMA: O'zbekiston YaIM o'sishi | 2019:5.6, 2020:1.9, 2021:7.4, 2022:5.7]\n"
+        f"Faqat HAQIQIY, tasdiqlangan raqamlardan foydalaning!\n"
+        f"Mavzuga diagramma mos kelmasa, qo'shmang.\n"
+    )
+    prompt = prompt + diagram_instruction
+
     system = (
         f"Sen O'zbekistonning eng tajribali {ln} prezentatsiya mutaxassisisisan. "
         f"Har bir slaydga KAMIDA 250 so'z yozasan — bu qat'iy talab. "
         f"SLAYD N: formatini o'zgartirmaysan. "
         f"Markdown belgisi ISHLATMAYSAN. "
         f"Faqat ilmiy, tasdiqlangan ma'lumotlar yozasan. "
-        f"Raqamlar, sanalar, faktlar — barchasi aniq bo'lsin."
+        f"Raqamlar, sanalar, faktlar — barchasi aniq bo'lsin. "
+        f"[DIAGRAMMA:...] formatida faqat haqiqiy raqamlar bilan diagramma qo'shasan."
     )
     result = claude(prompt, system, 8000, model=SONNET_MODEL)
     result = result.replace("**", "").replace("## ", "").replace("# ", "").replace("##", "").replace("#", "")
@@ -853,50 +1136,583 @@ def get_image(query):
 # ============================================================
 # 42 SHABLON
 # ============================================================
-TEMPLATES = {
-    "1": {"name": "🔵 Klassik Ko'k", "bg1": (30,87,179), "bg2": (0,150,255), "title": (255,255,255), "text": (220,235,255), "accent": (255,200,0)},
-    "2": {"name": "🌊 Okean", "bg1": (0,119,182), "bg2": (0,180,216), "title": (255,255,255), "text": (200,240,255), "accent": (144,224,239)},
-    "3": {"name": "🌿 Yashil", "bg1": (27,94,32), "bg2": (56,142,60), "title": (255,255,255), "text": (200,255,200), "accent": (255,235,59)},
-    "4": {"name": "🌅 Quyosh", "bg1": (230,81,0), "bg2": (255,152,0), "title": (255,255,255), "text": (255,240,200), "accent": (255,255,100)},
-    "5": {"name": "🌸 Pushti", "bg1": (136,14,79), "bg2": (233,30,99), "title": (255,255,255), "text": (255,210,230), "accent": (255,255,255)},
-    "6": {"name": "🌙 Qora", "bg1": (10,10,10), "bg2": (30,30,30), "title": (255,255,255), "text": (200,200,200), "accent": (0,200,255)},
-    "7": {"name": "⭐ Oltin", "bg1": (84,62,0), "bg2": (184,138,0), "title": (255,255,255), "text": (255,245,200), "accent": (255,215,0)},
-    "8": {"name": "🔴 Qizil", "bg1": (183,28,28), "bg2": (229,57,53), "title": (255,255,255), "text": (255,210,210), "accent": (255,255,255)},
-    "9": {"name": "💜 Binafsha", "bg1": (69,39,160), "bg2": (126,87,194), "title": (255,255,255), "text": (230,210,255), "accent": (255,200,100)},
-    "10": {"name": "🤍 Oq", "bg1": (245,245,245), "bg2": (255,255,255), "title": (30,30,30), "text": (60,60,60), "accent": (30,87,179)},
-    "11": {"name": "🏢 Korporativ", "bg1": (21,38,57), "bg2": (37,57,93), "title": (255,255,255), "text": (180,200,220), "accent": (0,180,255)},
-    "12": {"name": "🎨 Kreativ", "bg1": (74,0,114), "bg2": (255,0,100), "title": (255,255,255), "text": (255,200,240), "accent": (255,255,0)},
-    "13": {"name": "🌍 Tabiat", "bg1": (27,67,50), "bg2": (40,120,80), "title": (255,255,255), "text": (200,240,210), "accent": (255,235,59)},
-    "14": {"name": "❄️ Muzli", "bg1": (1,87,155), "bg2": (3,169,244), "title": (255,255,255), "text": (200,240,255), "accent": (255,255,255)},
-    "15": {"name": "🔥 Olov", "bg1": (100,0,0), "bg2": (200,50,0), "title": (255,255,255), "text": (255,220,200), "accent": (255,180,0)},
-    "16": {"name": "🌆 Shahar", "bg1": (38,50,56), "bg2": (84,110,122), "title": (255,255,255), "text": (200,215,220), "accent": (0,229,255)},
-    "17": {"name": "🎓 Akademik", "bg1": (62,39,35), "bg2": (109,76,65), "title": (255,255,255), "text": (255,235,220), "accent": (255,200,100)},
-    "18": {"name": "💼 Biznes", "bg1": (13,71,161), "bg2": (25,118,210), "title": (255,255,255), "text": (210,228,255), "accent": (255,215,0)},
-    "19": {"name": "🎭 Teatr", "bg1": (49,27,146), "bg2": (94,53,177), "title": (255,255,255), "text": (225,210,255), "accent": (255,235,59)},
-    "20": {"name": "🏔 Tog'", "bg1": (84,110,122), "bg2": (120,144,156), "title": (255,255,255), "text": (220,230,235), "accent": (255,235,59)},
-    "21": {"name": "🌺 Gul", "bg1": (136,14,79), "bg2": (216,67,21), "title": (255,255,255), "text": (255,215,220), "accent": (255,255,200)},
-    "22": {"name": "🔮 Sehrli", "bg1": (49,27,146), "bg2": (0,131,143), "title": (255,255,255), "text": (210,240,255), "accent": (255,200,255)},
-    "23": {"name": "☀️ Issiq", "bg1": (230,100,0), "bg2": (255,180,0), "title": (255,255,255), "text": (255,240,200), "accent": (255,255,255)},
-    "24": {"name": "🌊 Dengiz", "bg1": (0,60,100), "bg2": (0,120,180), "title": (255,255,255), "text": (200,235,255), "accent": (0,229,255)},
-    "25": {"name": "🦋 Kapalak", "bg1": (74,20,140), "bg2": (170,0,255), "title": (255,255,255), "text": (235,200,255), "accent": (255,255,100)},
-    "26": {"name": "🍃 Yashil2", "bg1": (27,94,32), "bg2": (100,180,50), "title": (255,255,255), "text": (210,245,210), "accent": (255,255,100)},
-    "27": {"name": "🌙 Kecha", "bg1": (5,5,30), "bg2": (20,20,60), "title": (180,180,255), "text": (150,150,200), "accent": (255,200,0)},
-    "28": {"name": "🌈 Kamalak", "bg1": (100,0,150), "bg2": (0,100,200), "title": (255,255,255), "text": (240,240,255), "accent": (255,255,0)},
-    "29": {"name": "🏜 Cho'l", "bg1": (100,70,20), "bg2": (180,130,50), "title": (255,255,255), "text": (255,240,200), "accent": (255,200,100)},
-    "30": {"name": "🎪 Sirk", "bg1": (183,28,28), "bg2": (255,160,0), "title": (255,255,255), "text": (255,240,200), "accent": (255,255,255)},
-    "31": {"name": "💎 Brilliant", "bg1": (0,40,80), "bg2": (0,100,180), "title": (200,230,255), "text": (180,220,255), "accent": (255,215,0)},
-    "32": {"name": "🌻 Kungaboqar", "bg1": (200,130,0), "bg2": (255,200,0), "title": (60,40,0), "text": (80,60,10), "accent": (180,100,0)},
-    "33": {"name": "🦚 Tovus", "bg1": (0,77,64), "bg2": (0,150,136), "title": (255,255,255), "text": (200,240,235), "accent": (255,235,59)},
-    "34": {"name": "🌃 Kecha2", "bg1": (10,10,40), "bg2": (40,40,80), "title": (100,200,255), "text": (150,180,220), "accent": (255,180,0)},
-    "35": {"name": "🍒 Gilos", "bg1": (120,0,30), "bg2": (200,30,60), "title": (255,255,255), "text": (255,200,210), "accent": (255,240,200)},
-    "36": {"name": "🧊 Muz", "bg1": (200,230,255), "bg2": (240,250,255), "title": (0,60,120), "text": (20,80,140), "accent": (0,120,215)},
-    "37": {"name": "🌴 Tropik", "bg1": (0,100,60), "bg2": (0,180,100), "title": (255,255,255), "text": (200,255,220), "accent": (255,220,0)},
-    "38": {"name": "🎵 Musiqa", "bg1": (20,0,40), "bg2": (80,0,120), "title": (255,150,255), "text": (200,150,220), "accent": (255,200,255)},
-    "39": {"name": "🏛 Antik", "bg1": (245,235,220), "bg2": (255,248,235), "title": (80,50,20), "text": (100,70,40), "accent": (150,100,30)},
-    "40": {"name": "⚡ Energiya", "bg1": (0,20,60), "bg2": (0,60,120), "title": (0,200,255), "text": (150,210,255), "accent": (255,230,0)},
-    "41": {"name": "🦁 Sher", "bg1": (100,60,0), "bg2": (200,120,0), "title": (255,255,255), "text": (255,235,200), "accent": (255,200,100)},
-    "42": {"name": "🌊 To'lqin", "bg1": (0,50,100), "bg2": (0,130,200), "title": (255,255,255), "text": (200,230,255), "accent": (100,255,255)},
+
+# ============================================================
+# 30 TA PROFESSIONAL SHABLON
+# ============================================================
+# ============================================================
+# 30 TA PROFESSIONAL SHABLON MODULI
+# Har biri to'liq boshqacha dizayn
+# ============================================================
+from pptx.util import Inches, Pt, Emu
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
+from pptx.oxml.ns import qn
+from lxml import etree
+import math
+
+def rgb(r, g, b):
+    return RGBColor(r, g, b)
+
+# ============================================================
+# 30 TA SHABLON TA'RIFI
+# Har birida: name, category, bg_func, decor_func, title_style, text_style
+# ============================================================
+
+TEMPLATES_30 = {
+    # ── MINIMALIST GURUH (1-6) ─────────────────────────────
+    "1": {
+        "name": "⬜ Toza Oq",
+        "category": "minimalist",
+        "preview": "🟫",
+        "desc": "Toza oq fon, ingichka chiziqlar",
+        "bg1": (255,255,255), "bg2": (248,249,250),
+        "accent": (33,150,243), "title_c": (15,15,15),
+        "text_c": (40,40,40), "line_c": (33,150,243),
+        "title_size": 32, "text_size": 15,
+        "style": "minimalist_clean"
+    },
+    "2": {
+        "name": "🔵 Ko'k Chiziq",
+        "category": "minimalist",
+        "preview": "🟦",
+        "desc": "Oq fon, ko'k aksent chiziqlari",
+        "bg1": (252,253,255), "bg2": (240,247,255),
+        "accent": (25,118,210), "title_c": (13,71,161),
+        "text_c": (30,30,50), "line_c": (25,118,210),
+        "title_size": 30, "text_size": 14,
+        "style": "minimalist_line"
+    },
+    "3": {
+        "name": "⚫ Qora Elegant",
+        "category": "minimalist",
+        "preview": "⬛",
+        "desc": "Qora fon, oltin detallar",
+        "bg1": (18,18,18), "bg2": (28,28,28),
+        "accent": (212,175,55), "title_c": (255,255,255),
+        "text_c": (220,220,220), "line_c": (212,175,55),
+        "title_size": 32, "text_size": 15,
+        "style": "dark_elegant"
+    },
+    "4": {
+        "name": "🌫️ Kulrang Sof",
+        "category": "minimalist",
+        "preview": "🔘",
+        "desc": "Kulrang gradient, zamonaviy ko'rinish",
+        "bg1": (236,239,241), "bg2": (207,216,220),
+        "accent": (84,110,122), "title_c": (33,33,33),
+        "text_c": (55,55,55), "line_c": (84,110,122),
+        "title_size": 30, "text_size": 14,
+        "style": "minimalist_gray"
+    },
+    "5": {
+        "name": "🟢 Yashil Toza",
+        "category": "minimalist",
+        "preview": "🟩",
+        "desc": "Yashil aksent, toza minimalist",
+        "bg1": (255,255,255), "bg2": (232,245,233),
+        "accent": (56,142,60), "title_c": (27,94,32),
+        "text_c": (33,33,33), "line_c": (56,142,60),
+        "title_size": 30, "text_size": 14,
+        "style": "minimalist_green"
+    },
+    "6": {
+        "name": "🔴 Qizil Bold",
+        "category": "minimalist",
+        "preview": "🟥",
+        "desc": "Qizil aksent, kuchli zamonaviy",
+        "bg1": (255,255,255), "bg2": (255,235,238),
+        "accent": (211,47,47), "title_c": (183,28,28),
+        "text_c": (33,33,33), "line_c": (211,47,47),
+        "title_size": 30, "text_size": 14,
+        "style": "minimalist_red"
+    },
+
+    # ── GRADIENT GURUH (7-12) ─────────────────────────────
+    "7": {
+        "name": "🌊 Okean Gradient",
+        "category": "gradient",
+        "preview": "🌊",
+        "desc": "Ko'k-moviy gradient",
+        "bg1": (13,71,161), "bg2": (3,169,244),
+        "accent": (255,255,255), "title_c": (255,255,255),
+        "text_c": (224,247,250), "line_c": (255,255,255),
+        "title_size": 32, "text_size": 15,
+        "style": "gradient_ocean"
+    },
+    "8": {
+        "name": "🌅 Quyosh Botishi",
+        "category": "gradient",
+        "preview": "🌅",
+        "desc": "To'q sariq-qizil gradient",
+        "bg1": (183,28,28), "bg2": (255,143,0),
+        "accent": (255,255,255), "title_c": (255,255,255),
+        "text_c": (255,243,224), "line_c": (255,255,255),
+        "title_size": 32, "text_size": 15,
+        "style": "gradient_sunset"
+    },
+    "9": {
+        "name": "💜 Binafsha Tun",
+        "category": "gradient",
+        "preview": "💜",
+        "desc": "To'q binafsha gradient",
+        "bg1": (49,27,146), "bg2": (123,31,162),
+        "accent": (206,147,216), "title_c": (255,255,255),
+        "text_c": (237,231,246), "line_c": (206,147,216),
+        "title_size": 32, "text_size": 15,
+        "style": "gradient_purple"
+    },
+    "10": {
+        "name": "🌿 O'rmon Gradient",
+        "category": "gradient",
+        "preview": "🌿",
+        "desc": "Yashil gradient tabiat uslubi",
+        "bg1": (27,94,32), "bg2": (100,181,46),
+        "accent": (255,255,255), "title_c": (255,255,255),
+        "text_c": (232,245,233), "line_c": (255,255,255),
+        "title_size": 32, "text_size": 15,
+        "style": "gradient_forest"
+    },
+    "11": {
+        "name": "🌌 Kosmik",
+        "category": "gradient",
+        "preview": "🌌",
+        "desc": "Qora-ko'k kosmik gradient",
+        "bg1": (5,5,30), "bg2": (30,30,80),
+        "accent": (100,181,246), "title_c": (255,255,255),
+        "text_c": (200,220,255), "line_c": (100,181,246),
+        "title_size": 32, "text_size": 15,
+        "style": "gradient_cosmic"
+    },
+    "12": {
+        "name": "🍑 Shaftoli",
+        "category": "gradient",
+        "preview": "🍑",
+        "desc": "Pushti-shaftoli yumshoq gradient",
+        "bg1": (255,138,101), "bg2": (255,193,157),
+        "accent": (255,255,255), "title_c": (255,255,255),
+        "text_c": (255,243,240), "line_c": (255,255,255),
+        "title_size": 30, "text_size": 14,
+        "style": "gradient_peach"
+    },
+
+    # ── GEOMETRIC GURUH (13-18) ───────────────────────────
+    "13": {
+        "name": "🔷 Ko'k Geometrik",
+        "category": "geometric",
+        "preview": "🔷",
+        "desc": "Ko'k uchburchaklar va shakllar",
+        "bg1": (255,255,255), "bg2": (227,242,253),
+        "accent": (21,101,192), "title_c": (13,71,161),
+        "text_c": (25,25,25), "line_c": (21,101,192),
+        "title_size": 30, "text_size": 14,
+        "style": "geometric_blue"
+    },
+    "14": {
+        "name": "🔶 Oltin Geometrik",
+        "category": "geometric",
+        "preview": "🔶",
+        "desc": "Oltin-qora geometrik uslub",
+        "bg1": (25,25,25), "bg2": (40,35,10),
+        "accent": (255,196,0), "title_c": (255,196,0),
+        "text_c": (240,240,240), "line_c": (255,196,0),
+        "title_size": 30, "text_size": 14,
+        "style": "geometric_gold"
+    },
+    "15": {
+        "name": "🔺 Qizil Uchburchak",
+        "category": "geometric",
+        "preview": "🔺",
+        "desc": "Qizil geometrik dizayn",
+        "bg1": (255,255,255), "bg2": (255,235,238),
+        "accent": (198,40,40), "title_c": (183,28,28),
+        "text_c": (30,30,30), "line_c": (198,40,40),
+        "title_size": 30, "text_size": 14,
+        "style": "geometric_red"
+    },
+    "16": {
+        "name": "💠 Moviy Mozaika",
+        "category": "geometric",
+        "preview": "💠",
+        "desc": "Moviy mozaika geometrik",
+        "bg1": (2,136,209), "bg2": (1,87,155),
+        "accent": (255,255,255), "title_c": (255,255,255),
+        "text_c": (225,245,254), "line_c": (255,255,255),
+        "title_size": 30, "text_size": 14,
+        "style": "geometric_mosaic"
+    },
+    "17": {
+        "name": "🟫 Bronza Geometrik",
+        "category": "geometric",
+        "preview": "🟫",
+        "desc": "Bronza-jigarrang geometrik",
+        "bg1": (62,39,35), "bg2": (78,52,46),
+        "accent": (188,143,143), "title_c": (255,204,128),
+        "text_c": (255,224,178), "line_c": (188,143,143),
+        "title_size": 30, "text_size": 14,
+        "style": "geometric_bronze"
+    },
+    "18": {
+        "name": "⬡ Oltiburchak",
+        "category": "geometric",
+        "preview": "⬡",
+        "desc": "Zamonaviy oltiburchak pattern",
+        "bg1": (245,245,245), "bg2": (224,224,224),
+        "accent": (97,97,97), "title_c": (33,33,33),
+        "text_c": (50,50,50), "line_c": (97,97,97),
+        "title_size": 28, "text_size": 13,
+        "style": "geometric_hex"
+    },
+
+    # ── KORPORATIV GURUH (19-24) ──────────────────────────
+    "19": {
+        "name": "🏢 Navy Professional",
+        "category": "corporate",
+        "preview": "🏢",
+        "desc": "Navy ko'k korporativ uslub",
+        "bg1": (255,255,255), "bg2": (232,234,246),
+        "accent": (26,35,126), "title_c": (26,35,126),
+        "text_c": (33,33,33), "line_c": (26,35,126),
+        "title_size": 30, "text_size": 14,
+        "style": "corporate_navy"
+    },
+    "20": {
+        "name": "🌐 Temir Korporativ",
+        "category": "corporate",
+        "preview": "🌐",
+        "desc": "Temir-kulrang professional",
+        "bg1": (33,33,33), "bg2": (55,55,55),
+        "accent": (96,125,139), "title_c": (255,255,255),
+        "text_c": (200,200,200), "line_c": (96,125,139),
+        "title_size": 30, "text_size": 14,
+        "style": "corporate_steel"
+    },
+    "21": {
+        "name": "📊 Ma'lumot Tahlil",
+        "category": "corporate",
+        "preview": "📊",
+        "desc": "Ma'lumot va tahlil uchun maxsus",
+        "bg1": (250,251,252), "bg2": (236,240,241),
+        "accent": (41,128,185), "title_c": (44,62,80),
+        "text_c": (52,73,94), "line_c": (41,128,185),
+        "title_size": 28, "text_size": 13,
+        "style": "corporate_data"
+    },
+    "22": {
+        "name": "🎯 Maqsad",
+        "category": "corporate",
+        "preview": "🎯",
+        "desc": "Sariq-qora biznes uslub",
+        "bg1": (255,255,255), "bg2": (255,253,231),
+        "accent": (245,127,23), "title_c": (230,81,0),
+        "text_c": (33,33,33), "line_c": (245,127,23),
+        "title_size": 30, "text_size": 14,
+        "style": "corporate_target"
+    },
+    "23": {
+        "name": "💼 Klassik Biznes",
+        "category": "corporate",
+        "preview": "💼",
+        "desc": "Klassik oq-ko'k biznes",
+        "bg1": (255,255,255), "bg2": (245,247,250),
+        "accent": (0,90,160), "title_c": (0,70,127),
+        "text_c": (40,40,60), "line_c": (0,90,160),
+        "title_size": 32, "text_size": 15,
+        "style": "corporate_classic"
+    },
+    "24": {
+        "name": "🔬 Ilmiy Tadqiqot",
+        "category": "corporate",
+        "preview": "🔬",
+        "desc": "Ilmiy-akademik professional uslub",
+        "bg1": (252,252,252), "bg2": (240,242,245),
+        "accent": (0,121,107), "title_c": (0,96,100),
+        "text_c": (30,40,40), "line_c": (0,121,107),
+        "title_size": 28, "text_size": 13,
+        "style": "corporate_academic"
+    },
+
+    # ── IJODIY GURUH (25-30) ──────────────────────────────
+    "25": {
+        "name": "🎨 Ijodiy Rang",
+        "category": "creative",
+        "preview": "🎨",
+        "desc": "Rangli ijodiy dizayn",
+        "bg1": (255,255,255), "bg2": (250,250,255),
+        "accent": (103,58,183), "title_c": (81,45,168),
+        "text_c": (30,30,50), "line_c": (103,58,183),
+        "title_size": 30, "text_size": 14,
+        "style": "creative_colorful"
+    },
+    "26": {
+        "name": "🌸 Pushti Zamonaviy",
+        "category": "creative",
+        "preview": "🌸",
+        "desc": "Pushti-oq zamonaviy",
+        "bg1": (255,255,255), "bg2": (252,228,236),
+        "accent": (216,27,96), "title_c": (173,20,87),
+        "text_c": (33,33,33), "line_c": (216,27,96),
+        "title_size": 30, "text_size": 14,
+        "style": "creative_pink"
+    },
+    "27": {
+        "name": "🔥 Olov",
+        "category": "creative",
+        "preview": "🔥",
+        "desc": "Qizil-sariq olov effekti",
+        "bg1": (15,15,15), "bg2": (40,10,0),
+        "accent": (255,87,34), "title_c": (255,193,7),
+        "text_c": (255,224,178), "line_c": (255,87,34),
+        "title_size": 32, "text_size": 15,
+        "style": "creative_fire"
+    },
+    "28": {
+        "name": "🌊 To'lqin",
+        "category": "creative",
+        "preview": "🌊",
+        "desc": "To'lqin effektli zamonaviy",
+        "bg1": (0,150,136), "bg2": (0,105,92),
+        "accent": (255,255,255), "title_c": (255,255,255),
+        "text_c": (224,242,241), "line_c": (255,255,255),
+        "title_size": 30, "text_size": 14,
+        "style": "creative_wave"
+    },
+    "29": {
+        "name": "✨ Yulduz Kechasi",
+        "category": "creative",
+        "preview": "✨",
+        "desc": "Yulduzli tun osmoni",
+        "bg1": (10,10,40), "bg2": (30,30,70),
+        "accent": (255,215,0), "title_c": (255,255,200),
+        "text_c": (200,210,255), "line_c": (255,215,0),
+        "title_size": 30, "text_size": 14,
+        "style": "creative_starnight"
+    },
+    "30": {
+        "name": "🎓 Akademik Klassik",
+        "category": "creative",
+        "preview": "🎓",
+        "desc": "Akademik klassik uslub",
+        "bg1": (250,245,230), "bg2": (240,230,210),
+        "accent": (120,90,30), "title_c": (80,50,10),
+        "text_c": (60,40,20), "line_c": (120,90,30),
+        "title_size": 30, "text_size": 14,
+        "style": "academic_classic"
+    },
 }
+
+# ============================================================
+# SHABLON FONGA CHIZISH FUNKSIYALARI
+# ============================================================
+
+def draw_minimalist_clean(sl, tmpl):
+    """Toza minimalist - ingichka chiziqlar"""
+    acc = rgb(*tmpl["accent"])
+    # Pastki chiziq
+    try:
+        bar = sl.shapes.add_shape(1, Inches(0), Inches(6.9), Inches(13.33), Inches(0.1))
+        bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
+    except: pass
+    # Yuqori ingichka chiziq
+    try:
+        bar2 = sl.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.33), Inches(0.05))
+        bar2.fill.solid(); bar2.fill.fore_color.rgb = acc; bar2.line.fill.background()
+    except: pass
+
+def draw_minimalist_line(sl, tmpl):
+    """Ko'k chiziq - chapda vertikal chiziq"""
+    acc = rgb(*tmpl["accent"])
+    try:
+        bar = sl.shapes.add_shape(1, Inches(0), Inches(0), Inches(0.12), Inches(7.5))
+        bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
+    except: pass
+    try:
+        bar2 = sl.shapes.add_shape(1, Inches(0), Inches(6.9), Inches(13.33), Inches(0.08))
+        bar2.fill.solid(); bar2.fill.fore_color.rgb = acc; bar2.line.fill.background()
+    except: pass
+
+def draw_dark_elegant(sl, tmpl):
+    """Qora elegant - oltin chiziqlar"""
+    acc = rgb(*tmpl["accent"])
+    try:
+        # Yuqori chiziq
+        bar = sl.shapes.add_shape(1, Inches(0.3), Inches(0.05), Inches(12.7), Inches(0.06))
+        bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
+        # Pastki chiziq
+        bar2 = sl.shapes.add_shape(1, Inches(0.3), Inches(7.35), Inches(12.7), Inches(0.06))
+        bar2.fill.solid(); bar2.fill.fore_color.rgb = acc; bar2.line.fill.background()
+        # O'ng doira
+        c = sl.shapes.add_shape(9, Inches(11.5), Inches(5.5), Inches(2.5), Inches(2.5))
+        c.fill.solid(); c.fill.fore_color.rgb = acc
+        c.fill.fore_color.transparency = 0.9; c.line.fill.background()
+    except: pass
+
+def draw_gradient_ocean(sl, tmpl):
+    """Okean gradient - to'lqin shakli"""
+    try:
+        # O'ng pastda katta doira
+        c1 = sl.shapes.add_shape(9, Inches(9), Inches(4), Inches(6), Inches(6))
+        c1.fill.solid(); c1.fill.fore_color.rgb = rgb(255,255,255)
+        c1.fill.fore_color.transparency = 0.9; c1.line.fill.background()
+        # Chap tomonda kichik doiralar
+        c2 = sl.shapes.add_shape(9, Inches(-1), Inches(-0.5), Inches(3), Inches(3))
+        c2.fill.solid(); c2.fill.fore_color.rgb = rgb(255,255,255)
+        c2.fill.fore_color.transparency = 0.85; c2.line.fill.background()
+    except: pass
+
+def draw_geometric_blue(sl, tmpl):
+    """Ko'k geometrik - uchburchaklar"""
+    acc = rgb(*tmpl["accent"])
+    try:
+        # O'ng uchda uchburchak
+        from pptx.util import Pt as _Pt
+        tri = sl.shapes.add_shape(5, Inches(10), Inches(0), Inches(3.33), Inches(3))
+        tri.fill.solid(); tri.fill.fore_color.rgb = acc
+        tri.fill.fore_color.transparency = 0.85; tri.line.fill.background()
+        # Pastda kichik uchburchak
+        tri2 = sl.shapes.add_shape(5, Inches(0), Inches(5.5), Inches(2), Inches(2))
+        tri2.fill.solid(); tri2.fill.fore_color.rgb = acc
+        tri2.fill.fore_color.transparency = 0.8; tri2.line.fill.background()
+        # Chiziq
+        bar = sl.shapes.add_shape(1, Inches(0), Inches(7.3), Inches(13.33), Inches(0.08))
+        bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
+    except: pass
+
+def draw_geometric_gold(sl, tmpl):
+    """Oltin geometrik - diagonal shakllar"""
+    acc = rgb(*tmpl["accent"])
+    try:
+        # Diagonal chiziqlar
+        for i in range(3):
+            bar = sl.shapes.add_shape(1, Inches(10+i*0.3), Inches(0), Inches(0.08), Inches(7.5))
+            bar.fill.solid(); bar.fill.fore_color.rgb = acc
+            bar.fill.fore_color.transparency = 0.7; bar.line.fill.background()
+        # Pastki chiziq
+        bar2 = sl.shapes.add_shape(1, Inches(0), Inches(7.2), Inches(13.33), Inches(0.06))
+        bar2.fill.solid(); bar2.fill.fore_color.rgb = acc; bar2.line.fill.background()
+    except: pass
+
+def draw_geometric_mosaic(sl, tmpl):
+    """Mozaika - kvadratlar"""
+    acc = rgb(255,255,255)
+    try:
+        for i in range(4):
+            for j in range(2):
+                sq = sl.shapes.add_shape(1, Inches(10.5+i*0.7), Inches(j*0.7), Inches(0.6), Inches(0.6))
+                sq.fill.solid(); sq.fill.fore_color.rgb = acc
+                sq.fill.fore_color.transparency = 0.8+j*0.05; sq.line.fill.background()
+    except: pass
+
+def draw_corporate_navy(sl, tmpl):
+    """Navy korporativ - chapda rangli panel"""
+    acc = rgb(*tmpl["accent"])
+    try:
+        # Chapda tor panel
+        panel = sl.shapes.add_shape(1, Inches(0), Inches(0), Inches(0.8), Inches(7.5))
+        panel.fill.solid(); panel.fill.fore_color.rgb = acc; panel.line.fill.background()
+        # Sarlavha osti chizig'i
+        bar = sl.shapes.add_shape(1, Inches(0.9), Inches(1.5), Inches(11), Inches(0.05))
+        bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
+    except: pass
+
+def draw_corporate_steel(sl, tmpl):
+    """Temir - metallik ko'rinish"""
+    acc = rgb(*tmpl["accent"])
+    try:
+        bar = sl.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.33), Inches(0.15))
+        bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
+        bar2 = sl.shapes.add_shape(1, Inches(0), Inches(7.35), Inches(13.33), Inches(0.08))
+        bar2.fill.solid(); bar2.fill.fore_color.rgb = acc; bar2.line.fill.background()
+    except: pass
+
+def draw_creative_fire(sl, tmpl):
+    """Olov - qizil-sariq shakllar"""
+    try:
+        c1 = sl.shapes.add_shape(9, Inches(10), Inches(3), Inches(5), Inches(5))
+        c1.fill.solid(); c1.fill.fore_color.rgb = rgb(255,87,34)
+        c1.fill.fore_color.transparency = 0.85; c1.line.fill.background()
+        c2 = sl.shapes.add_shape(9, Inches(-1), Inches(4), Inches(3), Inches(3))
+        c2.fill.solid(); c2.fill.fore_color.rgb = rgb(255,193,7)
+        c2.fill.fore_color.transparency = 0.8; c2.line.fill.background()
+    except: pass
+
+def draw_creative_wave(sl, tmpl):
+    """To'lqin - yumaloq shakllar"""
+    try:
+        for i, (x, y, s) in enumerate([(11,5,4),(-0.5,5.5,3),(6,6.5,2)]):
+            c = sl.shapes.add_shape(9, Inches(x), Inches(y), Inches(s), Inches(s))
+            c.fill.solid(); c.fill.fore_color.rgb = rgb(255,255,255)
+            c.fill.fore_color.transparency = 0.85; c.line.fill.background()
+    except: pass
+
+def draw_starnight(sl, tmpl):
+    """Yulduzli tun - kichik doiralar"""
+    acc = rgb(*tmpl["accent"])
+    import random
+    random.seed(42)
+    try:
+        for _ in range(12):
+            x = random.uniform(0, 12)
+            y = random.uniform(0, 7)
+            s = random.uniform(0.05, 0.12)
+            c = sl.shapes.add_shape(9, Inches(x), Inches(y), Inches(s), Inches(s))
+            c.fill.solid(); c.fill.fore_color.rgb = acc
+            c.fill.fore_color.transparency = random.uniform(0.3, 0.7)
+            c.line.fill.background()
+    except: pass
+
+def draw_academic(sl, tmpl):
+    """Akademik - ramka"""
+    acc = rgb(*tmpl["accent"])
+    try:
+        for coords in [(Inches(0.2), Inches(0.2), Inches(12.9), Inches(0.05)),
+                       (Inches(0.2), Inches(7.2), Inches(12.9), Inches(0.05)),
+                       (Inches(0.2), Inches(0.2), Inches(0.05), Inches(7.1)),
+                       (Inches(13.1), Inches(0.2), Inches(0.05), Inches(7.1))]:
+            bar = sl.shapes.add_shape(1, *coords)
+            bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
+    except: pass
+
+# Shablon uslubi → chizish funksiyasi xaritasi
+STYLE_DRAW_MAP = {
+    "minimalist_clean": draw_minimalist_clean,
+    "minimalist_line": draw_minimalist_line,
+    "minimalist_gray": draw_minimalist_clean,
+    "minimalist_green": draw_minimalist_line,
+    "minimalist_red": draw_minimalist_clean,
+    "dark_elegant": draw_dark_elegant,
+    "gradient_ocean": draw_gradient_ocean,
+    "gradient_sunset": draw_gradient_ocean,
+    "gradient_purple": draw_gradient_ocean,
+    "gradient_forest": draw_gradient_ocean,
+    "gradient_cosmic": draw_starnight,
+    "gradient_peach": draw_gradient_ocean,
+    "geometric_blue": draw_geometric_blue,
+    "geometric_gold": draw_geometric_gold,
+    "geometric_red": draw_geometric_blue,
+    "geometric_mosaic": draw_geometric_mosaic,
+    "geometric_bronze": draw_geometric_gold,
+    "geometric_hex": draw_corporate_steel,
+    "corporate_navy": draw_corporate_navy,
+    "corporate_steel": draw_corporate_steel,
+    "corporate_data": draw_minimalist_line,
+    "corporate_target": draw_minimalist_clean,
+    "corporate_classic": draw_corporate_navy,
+    "corporate_academic": draw_minimalist_line,
+    "creative_colorful": draw_geometric_blue,
+    "creative_pink": draw_minimalist_clean,
+    "creative_fire": draw_creative_fire,
+    "creative_wave": draw_gradient_ocean,
+    "creative_starnight": draw_starnight,
+    "academic_classic": draw_academic,
+}
+
+
+
+
+# Bot uchun TEMPLATES alias
+TEMPLATES = TEMPLATES_30
+
 
 # ============================================================
 # PPTX YARATISH
@@ -959,13 +1775,11 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
         fill.gradient_stops[0].position = 0; fill.gradient_stops[0].color.rgb = bg1
         fill.gradient_stops[1].position = 1.0; fill.gradient_stops[1].color.rgb = bg2
 
-        # Dekorativ doiralar
-        for cx, cy, sz in [(11.5,-0.8,3.5), (-0.8,5.5,2.5), (12.0,6.0,2.0)]:
-            try:
-                sh = sl.shapes.add_shape(9, Inches(cx), Inches(cy), Inches(sz), Inches(sz))
-                sh.fill.solid(); sh.fill.fore_color.rgb = RGBColor(255,255,255)
-                sh.fill.fore_color.transparency = 0.88; sh.line.fill.background()
-            except: pass
+        # Shablon uslubiga qarab dekorativ elementlar
+        tmpl_style = TEMPLATES.get(str(tmpl_id), {}).get("style", "minimalist_clean")
+        draw_func = STYLE_DRAW_MAP.get(tmpl_style, draw_minimalist_clean)
+        try: draw_func(sl, TEMPLATES.get(str(tmpl_id), {}))
+        except: pass
 
         # Yuqori chiziq
         try:
@@ -1075,7 +1889,20 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                         p2.font.color.rgb = txc
                         p2.space_before = Pt(3)
 
-                # Infografika bar chart
+                # Diagramma qo'shish (agar matnda bo'lsa)
+                full_slide_text = " ".join(bullets)
+                diag_data = parse_diagram_data(full_slide_text)
+                if diag_data:
+                    has_img_for_diag = has_img
+                    acc_color = acc
+                    txt_color = txc
+                    try:
+                        add_diagram_to_slide(sl, topic, title, full_slide_text, 
+                                           diag_data, acc_color, txt_color, has_img_for_diag)
+                    except Exception as de:
+                        logger.warning(f"Diagram error: {de}")
+
+                # Infografika bar chart (eski)
                 if infog:
                     try:
                         import re as _re2
@@ -1500,13 +2327,21 @@ def lc_kb(prefix):
 def tmpl_kb(page=0):
     kb = types.InlineKeyboardMarkup(row_width=2)
     keys = list(TEMPLATES.keys())
-    per = 10; start = page * per; end = min(start + per, len(keys))
+    per = 6; start = page * per; end = min(start + per, len(keys))
     for k in keys[start:end]:
-        kb.add(types.InlineKeyboardButton(TEMPLATES[k]["name"], callback_data=f"tmpl:{k}"))
+        tmpl = TEMPLATES[k]
+        preview = tmpl.get("preview", "🎨")
+        name = tmpl.get("name", k)
+        desc = tmpl.get("desc", "")
+        btn_text = f"{name}"
+        kb.add(types.InlineKeyboardButton(btn_text, callback_data=f"tmpl:{k}"))
     nav_btns = []
-    if page > 0: nav_btns.append(types.InlineKeyboardButton("◀️", callback_data=f"tmpl_p:{page-1}"))
-    if end < len(keys): nav_btns.append(types.InlineKeyboardButton("▶️", callback_data=f"tmpl_p:{page+1}"))
+    if page > 0: nav_btns.append(types.InlineKeyboardButton("◀️ Oldingi", callback_data=f"tmpl_p:{page-1}"))
+    if end < len(keys): nav_btns.append(types.InlineKeyboardButton("Keyingi ▶️", callback_data=f"tmpl_p:{page+1}"))
     if nav_btns: kb.row(*nav_btns)
+    # Sahifa ko'rsatkichi
+    total_pages = (len(keys) + per - 1) // per
+    kb.add(types.InlineKeyboardButton(f"📄 {page+1}/{total_pages} sahifa", callback_data="noop"))
     return kb
 
 
@@ -1783,6 +2618,10 @@ def cmd_done(msg):
 @bot.message_handler(content_types=["photo"])
 def photo_h(msg):
     uid = msg.from_user.id
+    if not check_subscription(uid) and get_sub_channels():
+        bot.send_message(uid, "⚠️ *Avval kanallarga obuna bo\'ling!*",
+            parse_mode="Markdown", reply_markup=sub_check_kb())
+        return
     state = gst(uid)
     ph = msg.photo[-1]
     td = tempfile.mkdtemp()
@@ -1914,6 +2753,19 @@ def text_h(msg):
     ud = UD.get(uid, {})
 
     reg_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+
+    # Obuna tekshirish (til tanlash va /start bundan mustasno)
+    skip_sub = [t_val for lang in ["uz","ru","en"] for t_val in [
+        TEXTS[lang].get("btn_lang_uz",""), TEXTS[lang].get("btn_lang_ru",""), 
+        TEXTS[lang].get("btn_lang_en","")
+    ]]
+    if not check_subscription(uid) and text not in skip_sub and state not in ["lang_select"]:
+        channels = get_sub_channels()
+        if channels:
+            bot.send_message(uid,
+                "⚠️ *Botdan foydalanish uchun quyidagi kanallarga obuna bo\'ling!*",
+                parse_mode="Markdown", reply_markup=sub_check_kb())
+            return
 
     # Barcha tillardagi menyu tugmalari
     menu_map = {}
@@ -2179,6 +3031,18 @@ def cb(call):
     d = call.data
     ud = UD.get(uid, {})
 
+    # Obuna tekshirish (check_sub va lang bundan mustasno)
+    sub_exempt = ["check_sub", "bk"] + [f"lang:{l}" for l in ["uz","ru","en"]]
+    if d not in sub_exempt and not d.startswith("lang:") and not check_subscription(uid):
+        channels = get_sub_channels()
+        if channels:
+            try: bot.answer_callback_query(call.id, "⚠️ Avval kanallarga obuna bo\'ling!")
+            except: pass
+            bot.send_message(uid,
+                "⚠️ *Botdan foydalanish uchun quyidagi kanallarga obuna bo\'ling!*",
+                parse_mode="Markdown", reply_markup=sub_check_kb())
+            return
+
     # Til tanlash
     if d.startswith("lang:"):
         try: bot.delete_message(uid, call.message.message_id)
@@ -2226,6 +3090,13 @@ def cb(call):
         return
 
     # Shablon tanlash
+    if d.startswith("tmpl_p:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
+        page = int(d[7:])
+        bot.send_message(uid, "🎨 Shablon tanlang:", reply_markup=tmpl_kb(page))
+        return
+
     if d.startswith("tmpl:"):
         try: bot.delete_message(uid, call.message.message_id)
         except: pass
