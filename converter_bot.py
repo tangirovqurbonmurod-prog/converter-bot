@@ -708,8 +708,18 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
             b = re.sub(r'^[-•►▸*\s]+', '', line)
             if b: cur_b.append(b)
     if cur_t: slides.append((cur_t, cur_b))
-    if not slides: slides = [(topic, [clean[:200]])]
-
+    # Agar SLAYD formati topilmasa, \n\n boyicha ajratamiz
+    if not slides or len(slides) < 2:
+        parts = [p.strip() for p in clean.split("\n\n") if p.strip()]
+        slides = []
+        for p in parts:
+            plines = [l.strip() for l in p.split("\n") if l.strip()]
+            if plines:
+                t = re.sub(r"^(SLAYD|SLIDE)\s*\d+[:\.]?\s*", "", plines[0], flags=re.IGNORECASE).strip() or plines[0]
+                b = [re.sub(r"^[-•►▸*\d\.\s]+", "", x) for x in plines[1:] if x]
+                slides.append((t[:80], b))
+    if not slides:
+        slides = [(topic, [clean[:200]])]
     for sn, (title, bullets) in enumerate(slides):
         sl = prs.slides.add_slide(blank)
 
