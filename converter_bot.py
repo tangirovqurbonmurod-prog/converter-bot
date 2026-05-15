@@ -2363,9 +2363,31 @@ def img_choice_kb():
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
         types.InlineKeyboardButton("🤖 AI avtomatik rasm qo'ysin", callback_data="img:ai"),
-        types.InlineKeyboardButton("🖼 O'zim rasm yuklаyman", callback_data="img:user"),
+        types.InlineKeyboardButton("🖼 O'zim rasm yuklayman", callback_data="img:user"),
         types.InlineKeyboardButton("❌ Rasmsiz davom etish", callback_data="img:none")
     )
+    return kb
+
+def img_slide_select_kb(total_slides, page=0, mode="ai"):
+    """Qaysi slaydlarga rasm yuklashni tanlash — sahifalab"""
+    per_page = 10
+    start = page * per_page + 1
+    end = min(start + per_page - 1, total_slides)
+    kb = types.InlineKeyboardMarkup(row_width=5)
+    btns = []
+    for n in range(start, end + 1):
+        btns.append(types.InlineKeyboardButton(str(n), callback_data=f"img_slide:{n}:{mode}"))
+    kb.add(*btns)
+    nav = []
+    if page > 0:
+        nav.append(types.InlineKeyboardButton("◀️", callback_data=f"img_slide_page:{page-1}:{mode}"))
+    if end < total_slides:
+        nav.append(types.InlineKeyboardButton("▶️", callback_data=f"img_slide_page:{page+1}:{mode}"))
+    if nav: kb.row(*nav)
+    total_pages = (total_slides + per_page - 1) // per_page
+    kb.add(types.InlineKeyboardButton(f"📄 {page+1}/{total_pages} ({start}-{end})", callback_data="noop"))
+    kb.add(types.InlineKeyboardButton("✅ Tayyor (tanlangan slaydlar bilan davom et)", callback_data=f"img_slide_done:{mode}"))
+    kb.add(types.InlineKeyboardButton("🏠 Menyu", callback_data="bk"))
     return kb
 
 def conv_kb():
@@ -2434,8 +2456,9 @@ def cmd_referat(msg):
     if not check_subscription(uid):
         bot.send_message(uid, "⚠️ Botdan foydalanish uchun kanallarga obuna bo\'ling!", reply_markup=sub_check_kb())
         return
+    UD.setdefault(uid, {})["source_type"] = "none"
     sst(uid, "referat_t", svc="referat")
-    bot.send_message(uid, "📚 Qaysi manbadan foydalanaylik?", reply_markup=source_kb())
+    bot.send_message(uid, t(uid, "enter_topic"), reply_markup=bk_kb())
 
 @bot.message_handler(commands=["kursishi"])
 def cmd_kurs(msg):
@@ -2785,7 +2808,12 @@ def text_h(msg):
     if text in menu_map:
         st2, svc = menu_map[text]
         sst(uid, st2, svc=svc)
-        bot.send_message(uid, t(uid, "enter_topic"), reply_markup=bk_kb()); return
+        # Referat, kurs, mustaqil, maqola uchun manba tanlash
+        if svc in ("referat", "kurs", "mustaqil", "maqola"):
+            bot.send_message(uid, "📚 Qaysi manbadan foydalanaylik?", reply_markup=source_kb())
+        else:
+            bot.send_message(uid, t(uid, "enter_topic"), reply_markup=bk_kb())
+        return
 
     # Imlo
     imlo_btns = [TEXTS[l]["btn_imlo"] for l in ["uz","ru","en"]]
