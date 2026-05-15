@@ -18,8 +18,8 @@ DONATE_CARD    = os.environ.get("DONATE_CARD",    "9860 0609 2665 0809")
 DONATE_CLICK   = os.environ.get("DONATE_CLICK",   "+998 94 975 03 04")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 UNSPLASH_KEY   = os.environ.get("UNSPLASH_KEY",   "")
-SONNET_MODEL   = "claude-sonnet-4-20250514"
-HAIKU_MODEL    = "claude-haiku-4-5-20251001"
+SONNET_MODEL   = os.environ.get("SONNET_MODEL", "claude-sonnet-4-6")
+HAIKU_MODEL    = os.environ.get("HAIKU_MODEL", "claude-haiku-4-5-20251001")
 
 def gp(n, d): return int(os.environ.get(n, str(d)))
 PRICE_PAGE     = gp("PRICE_PAGE",    300)
@@ -29,6 +29,75 @@ PRICE_MAQOLA   = gp("PRICE_MAQOLA",  400)
 PRICE_SLIDE    = gp("PRICE_SLIDE",   300)
 PRICE_TEST     = gp("PRICE_TEST",    150)
 BONUS_FIRST    = gp("BONUS_FIRST",  3000)
+
+
+# ============================================================
+# MAJBURIY OBUNA TIZIMI
+# ============================================================
+SUB_ENABLED = os.environ.get("SUB_ENABLED", "0") == "1"
+
+def get_sub_channels():
+    """DB dan obuna kanallarini olish"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("SELECT channel_id, channel_name FROM sub_channels WHERE active=1")
+        rows = cur.fetchall(); c.close()
+        return rows
+    except: return []
+
+def add_sub_channel(channel_id, channel_name):
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("INSERT OR REPLACE INTO sub_channels(channel_id, channel_name, active) VALUES(?,?,1)",
+            (channel_id, channel_name))
+        c.commit(); c.close(); return True
+    except: return False
+
+def remove_sub_channel(channel_id):
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("DELETE FROM sub_channels WHERE channel_id=?", (channel_id,))
+        c.commit(); c.close(); return True
+    except: return False
+
+def check_subscription(uid):
+    """Foydalanuvchi barcha kanallarga obuna bo'lganmi"""
+    if not SUB_ENABLED: return True
+    channels = get_sub_channels()
+    if not channels: return True
+    for ch_id, ch_name in channels:
+        try:
+            member = bot.get_chat_member(ch_id, uid)
+            if member.status in ['left', 'kicked', 'banned']:
+                return False
+        except: return False
+    return True
+
+def sub_check_kb():
+    """Obuna tekshirish tugmasi"""
+    channels = get_sub_channels()
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for ch_id, ch_name in channels:
+        try:
+            invite = bot.export_chat_invite_link(ch_id)
+        except:
+            invite = f"https://t.me/{str(ch_id).lstrip('-100')}"
+        kb.add(types.InlineKeyboardButton(f"📢 {ch_name}", url=invite))
+    kb.add(types.InlineKeyboardButton("✅ Obunani tekshirish", callback_data="check_sub"))
+    return kb
+
+def require_sub(uid, func, *args, **kwargs):
+    """Obunani tekshirib, agar obuna bo'lmasa xabar yuborish"""
+    if check_subscription(uid):
+        return func(*args, **kwargs)
+    channels = get_sub_channels()
+    ch_list = "\n".join([f"• {name}" for _, name in channels])
+    bot.send_message(uid,
+        f"⚠️ *Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:*\n\n{ch_list}\n\n"
+        f"Obuna bo'lgach ✅ tugmasini bosing.",
+        parse_mode="Markdown",
+        reply_markup=sub_check_kb())
+    return None
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -84,7 +153,7 @@ TEXTS = {
         "user_img": "🖼 O'zim rasm yuklаyman",
         "no_img": "❌ Rasmsiz davom etish",
         "help_text": "❓ *Yordam*\n\n📄 /referat — Referat\n📝 /kursishi — Kurs ishi\n📋 /mustaqilish — Mustaqil ish\n📰 /maqola — Maqola\n📊 /prezentatsiya — Prezentatsiya\n✅ /test — Test\n✏️ /imlo — Imlo tuzatish\n🔄 /konvertatsiya — Konvertatsiya\n💰 /balans — Balans",
-        "prices": "💵 *Narxlar:*\n📄 Referat: {p1:,}/bet\n📝 Kurs ishi: {p2:,}/bet\n📋 Mustaqil: {p3:,}/bet\n📰 Maqola: {p4:,}/bet\n📊 Prezentatsiya: {p5:,}/slayd\n✅ Test: {p6:,}/savol",
+        "prices": "💵 *Narxlar:*\n📄 Referat: {p1:,} so'm/bet\n📝 Kurs ishi: {p2:,} so'm/bet\n📋 Mustaqil: {p3:,} so'm/bet\n📰 Maqola: {p4:,} so'm/bet\n📊 Prezentatsiya: {p5:,} so'm/slayd\n✅ Test: {p6:,} so'm/savol",
         "btn_referat": "📄 Referat",
         "btn_kurs": "📝 Kurs ishi",
         "btn_mustaqil": "📋 Mustaqil ish",
@@ -261,6 +330,8 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER,
         tur TEXT, mavzu TEXT, format TEXT, sahifalar TEXT,
         narx INTEGER, created_at TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS sub_channels(
+        channel_id TEXT PRIMARY KEY, channel_name TEXT, active INTEGER DEFAULT 1)""")
     c.commit(); c.close()
 
 import json
@@ -465,32 +536,43 @@ def clean_text(text):
 # MAZMUN YARATISH
 # ============================================================
 def gen_prez(topic, slides, lang, ud={}, plans=5):
-    """Prezentatsiya mazmuni yaratish"""
+    """Prezentatsiya mazmuni yaratish — SLAYD N: formatida"""
     ln = LN.get(lang, "o'zbek")
     info = build_info(ud)
     subject = f"\nFan: {ud['subject']}" if ud.get('subject') else ""
+
     prompt = (
-        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nTil: {ln}\n{info}{subject}\n\n"
-        f"QOIDA: Har slayd SLAYD N: bilan boshlansin. Markdown taqiqlangan. Til: {ln}\n\n"
-        f"SLAYD 1: {topic}\n"
-        f"[kirish matni]\n\n"
-        f"SLAYD 2: Reja\n"
-        f"1. Birinchi bolim\n"
-        f"2. Ikkinchi bolim\n\n"
-        f"SLAYD 3: [sarlavha]\n"
-        f"[4-5 ta fakt]\n\n"
-        f"SLAYD {slides}: Xulosa\n"
-        f"[xulosalar. Jami {slides} ta slayd bo'lsin]"
+        f"Mavzu: {topic}\nSlaydlar soni: {slides}\n{info}{subject}\n\n"
+        f"QUYIDAGI FORMATDA YOZ. HAR SLAYD 'SLAYD N:' BILAN BOSHLANSIN:\n\n"
+        f"SLAYD 1: {topic}\n\n"
+        f"SLAYD 2: REJALAR\n"
+        f"1. Birinchi bo'lim\n"
+        f"2. Ikkinchi bo'lim\n"
+        f"3. Uchinchi bo'lim\n\n"
+        f"SLAYD 3: [Birinchi bo'lim nomi]\n"
+        f"[4-6 ta aniq fakt, raqam va statistika]\n\n"
+        f"SLAYD 4: [Ikkinchi bo'lim nomi]\n"
+        f"[4-6 ta aniq fakt, raqam va statistika]\n\n"
+        f"... shunday davom et ...\n\n"
+        f"SLAYD {slides}: XULOSA\n"
+        f"[Asosiy xulosalar]\n"
+        f"Foydalanilgan adabiyotlar: 1. ... 2. ... 3. ...\n\n"
+        f"TALABLAR:\n"
+        f"1. Har slayd 'SLAYD N:' bilan boshlansin — MAJBURIY!\n"
+        f"2. Jami {slides} ta slayd bo'lsin\n"
+        f"3. Har slaydda aniq raqamlar va statistika bo'lsin\n"
+        f"4. Faqat ilmiy manbalardan ma'lumot\n"
+        f"5. Hech qanday **, ##, * belgisi ishlatilmasin\n"
+        f"6. Imlo 100% to'g'ri bo'lsin"
     )
     system = (
-        f"Sen prezentatsiya yaratuvchisan. "
-        f"SLAYD N: formatini QATIY ushla. "
-        f"Markdown belgisi ISHLATMA. Til: {ln}."
+        f"Sen professional {ln} prezentatsiya mutaxassisisanm. "
+        f"'SLAYD N:' formatini qat'iy ushlab turasan. "
+        f"Markdown belgisi ishlatmaysan. Imlo xatosiz yozasan."
     )
     result = claude(prompt, system, 4000, model=SONNET_MODEL)
-    logger.info(f'PREZ_RESULT: {result[:800]}')
-    result = result.replace('**', '').replace('## ', '').replace('# ', '').replace('##', '').replace('#', '')
-    return result
+    return clean_text(result)
+
 def gen_doc(svc, topic, pages, lang, ud={}):
     """Hujjat yaratish (referat, kurs ishi, maqola, mustaqil)"""
     ln = LN.get(lang, "o'zbek")
@@ -561,7 +643,12 @@ def gen_doc(svc, topic, pages, lang, ud={}):
         f"Markdown belgisi ASLO ishlatmaysan. "
         f"Imlo va grammatika xatosiz yozasan."
     )
-    result = claude(prompt, system, 4000, model=use_model)
+    # Manba qo'shish
+    source_ctx = build_prompt_with_source(svc, topic, pages, lang, ud)
+    if source_ctx:
+        prompt = prompt + source_ctx
+    
+    result = claude(prompt, system, min(pages * 200 + 2000, 4000), model=use_model)
     return clean_text(result)
 
 def gen_test(topic, count, lang):
@@ -599,6 +686,48 @@ def fix_spell(text, lang):
 # ============================================================
 # RASM OLISH
 # ============================================================
+
+def web_search_topic(query, lang="uz"):
+    """Mavzu bo'yicha internetdan ma'lumot qidirish"""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        # DuckDuckGo API
+        r = requests.get(
+            f"https://api.duckduckgo.com/?q={requests.utils.quote(query)}&format=json&no_html=1&skip_disambig=1",
+            headers=headers, timeout=10
+        )
+        if r.status_code == 200:
+            data = r.json()
+            abstract = data.get("AbstractText", "")
+            related = [t.get("Text","") for t in data.get("RelatedTopics", [])[:5] if t.get("Text")]
+            if abstract or related:
+                info = abstract + "\n" + "\n".join(related)
+                return info[:2000]
+    except Exception as e:
+        logger.warning(f"Web search: {e}")
+    return ""
+
+def build_prompt_with_source(svc, topic, pages, lang, ud):
+    """Manba asosida prompt yaratish"""
+    source_type = ud.get("source_type", "none")
+    source_text = ud.get("source_text", "")
+    book_name = ud.get("book_name", "")
+    
+    # Kitob nomi yoki matn berilgan bo'lsa
+    if source_type == "text" and book_name:
+        web_info = web_search_topic(f"{book_name} {topic}", lang)
+        source_context = f"\n\nManba kitob: {book_name}\n"
+        if web_info:
+            source_context += f"Kitobdan ma'lumotlar:\n{web_info[:1500]}\n"
+        source_context += f"\nFAQAT shu kitob/{book_name} ma'lumotlaridan foydalaning!"
+    elif source_type == "pdf" and source_text:
+        source_context = f"\n\nQuyidagi kitob matni asosida yarating:\n{source_text[:3000]}\n\nFaqat berilgan matn asosida yozing!"
+    else:
+        web_info = web_search_topic(f"{topic} statistics data", lang)
+        source_context = f"\n\nQo'shimcha ma'lumot:\n{web_info[:1000]}" if web_info else ""
+    
+    return source_context
+
 def get_image(query):
     """Internetdan mavzuga mos rasm olish"""
     try:
@@ -709,18 +838,8 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
             b = re.sub(r'^[-•►▸*\s]+', '', line)
             if b: cur_b.append(b)
     if cur_t: slides.append((cur_t, cur_b))
-    # Agar SLAYD formati topilmasa, \n\n boyicha ajratamiz
-    if not slides or len(slides) < 2:
-        parts = [p.strip() for p in clean.split("\n\n") if p.strip()]
-        slides = []
-        for p in parts:
-            plines = [l.strip() for l in p.split("\n") if l.strip()]
-            if plines:
-                t = re.sub(r"^(SLAYD|SLIDE)\s*\d+[:\.]?\s*", "", plines[0], flags=re.IGNORECASE).strip() or plines[0]
-                b = [re.sub(r"^[-•►▸*\d\.\s]+", "", x) for x in plines[1:] if x]
-                slides.append((t[:80], b))
-    if not slides:
-        slides = [(topic, [clean[:200]])]
+    if not slides: slides = [(topic, [clean[:200]])]
+
     for sn, (title, bullets) in enumerate(slides):
         sl = prs.slides.add_slide(blank)
 
@@ -902,13 +1021,7 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                             txt = sh.text_frame.paragraphs[0].text.strip()
                             if txt and len(txt) > 3 and txt != topic:
                                 slide_title = txt; break
-                    # Sarlavhani inglizchaga tarjima qilib qidiramiz
-                    try:
-                        en_query = claude(f"Translate to English (2-3 words only, no explanation): {slide_title} {topic}", max_tok=20)
-                        en_query = en_query.strip().split('\n')[0][:50]
-                    except:
-                        en_query = f"{slide_title} {topic}"[:50]
-                    img_buf = get_image(en_query)
+                    img_buf = get_image(f"{slide_title} {topic}"[:60])
                     if img_buf:
                         if slide_num % 2 == 0:
                             sl2.shapes.add_picture(img_buf, Inches(0.4), Inches(1.7), Inches(12.5), Inches(3.2))
@@ -1271,6 +1384,18 @@ def tmpl_kb(page=0):
     if nav_btns: kb.row(*nav_btns)
     return kb
 
+
+def source_kb():
+    """Manba tanlash — kitob yoki mavzu"""
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        types.InlineKeyboardButton("📚 Kitob/Fan nomi yozaman", callback_data="src:text"),
+        types.InlineKeyboardButton("📄 PDF kitob yuklayaman", callback_data="src:pdf"),
+        types.InlineKeyboardButton("🌐 Umumiy mavzu (manbasisiz)", callback_data="src:none"),
+        types.InlineKeyboardButton("🏠 Menyu", callback_data="bk")
+    )
+    return kb
+
 def img_choice_kb():
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
@@ -1320,6 +1445,15 @@ def cmd_start(msg):
     uname = msg.from_user.username or ""
     fname = msg.from_user.first_name or ""
     is_new = reg_user(uid, uname, fname)
+    # Obuna tekshirish
+    if not check_subscription(uid):
+        channels = get_sub_channels()
+        ch_list = "\n".join([f"• {name}" for _, name in channels])
+        bot.send_message(uid,
+            f"⚠️ *Botdan foydalanish uchun quyidagi kanallarga obuna bo\'ling:*\n\n{ch_list}\n\n"
+            f"Obuna bo\'lgach ✅ tugmasini bosing.",
+            parse_mode="Markdown", reply_markup=sub_check_kb())
+        return
 
     txt = t(uid, "welcome", name=fname)
     if is_new:
@@ -1334,29 +1468,41 @@ def cmd_start(msg):
 def cmd_referat(msg):
     uid = msg.from_user.id
     reg_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+    if not check_subscription(uid):
+        bot.send_message(uid, "⚠️ Botdan foydalanish uchun kanallarga obuna bo\'ling!", reply_markup=sub_check_kb())
+        return
     sst(uid, "referat_t", svc="referat")
-    bot.send_message(uid, t(uid, "enter_topic"), reply_markup=bk_kb())
+    bot.send_message(uid, "📚 Qaysi manbadan foydalanaylik?", reply_markup=source_kb())
 
 @bot.message_handler(commands=["kursishi"])
 def cmd_kurs(msg):
     uid = msg.from_user.id
     reg_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+    if not check_subscription(uid):
+        bot.send_message(uid, "⚠️ Botdan foydalanish uchun kanallarga obuna bo\'ling!", reply_markup=sub_check_kb())
+        return
     sst(uid, "kurs_t", svc="kurs")
-    bot.send_message(uid, t(uid, "enter_topic"), reply_markup=bk_kb())
+    bot.send_message(uid, "📚 Qaysi manbadan foydalanaylik?", reply_markup=source_kb())
 
 @bot.message_handler(commands=["mustaqilish"])
 def cmd_mustaqil(msg):
     uid = msg.from_user.id
     reg_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+    if not check_subscription(uid):
+        bot.send_message(uid, "⚠️ Botdan foydalanish uchun kanallarga obuna bo\'ling!", reply_markup=sub_check_kb())
+        return
     sst(uid, "mustaqil_t", svc="mustaqil")
-    bot.send_message(uid, t(uid, "enter_topic"), reply_markup=bk_kb())
+    bot.send_message(uid, "📚 Qaysi manbadan foydalanaylik?", reply_markup=source_kb())
 
 @bot.message_handler(commands=["maqola"])
 def cmd_maqola(msg):
     uid = msg.from_user.id
     reg_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+    if not check_subscription(uid):
+        bot.send_message(uid, "⚠️ Botdan foydalanish uchun kanallarga obuna bo\'ling!", reply_markup=sub_check_kb())
+        return
     sst(uid, "maqola_t", svc="maqola")
-    bot.send_message(uid, t(uid, "enter_topic"), reply_markup=bk_kb())
+    bot.send_message(uid, "📚 Qaysi manbadan foydalanaylik?", reply_markup=source_kb())
 
 @bot.message_handler(commands=["prezentatsiya"])
 def cmd_prez(msg):
@@ -1409,6 +1555,56 @@ def cmd_help(msg):
         p1=PRICE_PAGE, p2=PRICE_KURS, p3=PRICE_MUSTAQIL,
         p4=PRICE_MAQOLA, p5=PRICE_SLIDE, p6=PRICE_TEST)
     bot.send_message(uid, help_txt, parse_mode="Markdown", reply_markup=main_kb(uid))
+
+
+@bot.message_handler(commands=["subon"])
+def cmd_subon(msg):
+    if msg.from_user.id != ADMIN_ID: return
+    global SUB_ENABLED
+    SUB_ENABLED = True
+    bot.send_message(msg.chat.id, "✅ Majburiy obuna *yoqildi!*", parse_mode="Markdown")
+
+@bot.message_handler(commands=["suboff"])
+def cmd_suboff(msg):
+    if msg.from_user.id != ADMIN_ID: return
+    global SUB_ENABLED
+    SUB_ENABLED = False
+    bot.send_message(msg.chat.id, "❌ Majburiy obuna *o'chirildi!*", parse_mode="Markdown")
+
+@bot.message_handler(commands=["addchannel"])
+def cmd_addchannel(msg):
+    if msg.from_user.id != ADMIN_ID: return
+    try:
+        parts = msg.text.split(None, 2)
+        ch_id = parts[1]
+        ch_name = parts[2] if len(parts) > 2 else ch_id
+        add_sub_channel(ch_id, ch_name)
+        bot.send_message(msg.chat.id, f"✅ Kanal qo'shildi: *{ch_name}*", parse_mode="Markdown")
+    except:
+        bot.send_message(msg.chat.id, "❌ /addchannel [kanal_id] [kanal_nomi]\nMasalan: /addchannel -1001234567890 Mening Kanalim")
+
+@bot.message_handler(commands=["removechannel"])
+def cmd_removechannel(msg):
+    if msg.from_user.id != ADMIN_ID: return
+    try:
+        ch_id = msg.text.split()[1]
+        remove_sub_channel(ch_id)
+        bot.send_message(msg.chat.id, f"✅ Kanal o'chirildi: {ch_id}")
+    except:
+        bot.send_message(msg.chat.id, "❌ /removechannel [kanal_id]")
+
+@bot.message_handler(commands=["channels"])
+def cmd_channels(msg):
+    if msg.from_user.id != ADMIN_ID: return
+    channels = get_sub_channels()
+    if not channels:
+        bot.send_message(msg.chat.id, "📋 Hech qanday kanal qo'shilmagan.")
+        return
+    txt = f"📋 *Kanallar ({len(channels)} ta):*\n\n"
+    for ch_id, ch_name in channels:
+        txt += f"• {ch_name} | ID: `{ch_id}`\n"
+    txt += f"\n{'✅ Obuna yoqilgan' if SUB_ENABLED else '❌ Obuna o\'chirilgan'}"
+    bot.send_message(msg.chat.id, txt, parse_mode="Markdown")
 
 @bot.message_handler(commands=["stats"])
 def cmd_stats(msg):
@@ -1495,6 +1691,37 @@ def doc_h(msg):
     state = gst(uid)
     d = msg.document
     if not d: return
+        
+    # Kitob PDF yuklash
+    if state == "wait_book_pdf":
+        pm_b = bot.send_message(uid, "⏳ PDF o'qilmoqda...")
+        try:
+            fi_b = bot.get_file(d.file_id)
+            data_b = bot.download_file(fi_b.file_path)
+            inp_b = os.path.join(td, d.file_name or "book.pdf")
+            with open(inp_b, "wb") as f: f.write(data_b)
+            txt_b = pdf_to_text(inp_b) if (d.file_name or "").lower().endswith(".pdf") else ""
+            book_name_b = (d.file_name or "kitob").replace(".pdf","").replace(".PDF","")
+            if txt_b and len(txt_b) > 100:
+                UD.setdefault(uid, {})["source_text"] = txt_b[:4000]
+                UD[uid]["source_type"] = "pdf"
+            else:
+                UD.setdefault(uid, {})["source_type"] = "text"
+            UD.setdefault(uid, {})["book_name"] = book_name_b
+            svc_b = ud.get("svc", "referat")
+            sst(uid, f"{svc_b}_t")
+            try: bot.delete_message(uid, pm_b.message_id)
+            except: pass
+            bot.send_message(uid,
+                f"✅ Kitob: *{book_name_b}*\n\n📝 Endi mavzuni kiriting:",
+                parse_mode="Markdown", reply_markup=bk_kb())
+        except Exception as e_b:
+            logger.error(f"Book PDF: {e_b}")
+            bot.send_message(uid, "❌ Xato. Kitob nomini yozing:")
+            sst(uid, "wait_book_name")
+        shutil.rmtree(td, ignore_errors=True)
+        return
+
     if d.file_size > 20*1024*1024:
         bot.send_message(uid, "❌ Fayl juda katta (max 20MB)"); return
     fname = (d.file_name or "").lower()
@@ -1642,6 +1869,16 @@ def text_h(msg):
         bot.send_message(uid, "👨‍💼 Admin", reply_markup=kb2); return
 
     # Broadcast
+
+    # Kitob nomi kutish
+    if state == "wait_book_name":
+        UD.setdefault(uid, {})["book_name"] = text
+        svc = ud.get("svc", "referat")
+        sst(uid, f"{svc}_t")
+        bot.send_message(uid, f"✅ Kitob: *{text}*\n\n📝 Endi mavzuni kiriting:", 
+            parse_mode="Markdown", reply_markup=bk_kb())
+        return
+
     if state == "bc":
         users = all_users()
         ok = 0
@@ -1782,6 +2019,8 @@ def cb(call):
 
     # Til tanlash
     if d.startswith("lang:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         lang = d[5:]
         set_lang(uid, lang)
         try: bot.edit_message_text(TEXTS[lang]["lang_set"], uid, call.message.message_id)
@@ -1824,6 +2063,8 @@ def cb(call):
 
     # Shablon tanlash
     if d.startswith("tmpl:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         tmpl_id = d[5:]
         UD.setdefault(uid, {})["template_id"] = tmpl_id
         sst(uid, "prez_slides")
@@ -1839,6 +2080,8 @@ def cb(call):
 
     # Slayd soni
     if d.startswith("slides:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         val = d[7:]
         if val == "custom":
             sst(uid, "prez_slides_custom")
@@ -1860,6 +2103,8 @@ def cb(call):
 
     # Reja soni
     if d.startswith("plans:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         val = d[6:]
         if val == "custom":
             sst(uid, "prez_plans_custom")
@@ -1899,6 +2144,8 @@ def cb(call):
 
     # Test savol soni
     if d.startswith("tcount:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         val = d[7:]
         if val == "custom":
             sst(uid, "test_p")
@@ -1920,6 +2167,8 @@ def cb(call):
 
     # Rasm tanlash
     if d.startswith("img:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         choice = d[4:]
         slides = ud.get("slides", 15)
         if choice == "ai":
@@ -2001,6 +2250,8 @@ def cb(call):
 
     # Prezentatsiya format
     if d.startswith("pfmt:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         fmt = d[5:]
         UD.setdefault(uid, {})["fmt"] = fmt
         topic = ud.get("topic","")
@@ -2050,6 +2301,8 @@ def cb(call):
 
     # Test yaratish
     if d == "test_go":
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         topic = ud.get("topic","")
         count = ud.get("count", 10)
         lang = ud.get("lang", get_lang(uid))
@@ -2100,6 +2353,8 @@ def cb(call):
 
     # Topup
     if d == "topup":
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         bot.send_message(uid,
             f"💳 *Balans to'ldirish*\n\n"
             f"💳 Karta: `{DONATE_CARD}`\n"
