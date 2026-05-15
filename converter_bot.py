@@ -906,7 +906,7 @@ def gen_prez(topic, slides, lang, ud={}, plans=5):
     slide_lines = ""
     for i in range(1, slides + 1):
         if i == 1: slide_lines += f"SLAYD 1: {topic}\n"
-        elif i == 2: slide_lines += f"SLAYD 2: Mundarija\n"
+        elif i == 2: slide_lines += f"SLAYD 2: Reja\n"
         elif i == slides: slide_lines += f"SLAYD {slides}: Xulosa\n"
         else: slide_lines += f"SLAYD {i}: [Bo'lim sarlavhasi]\n"
 
@@ -1108,28 +1108,56 @@ def build_prompt_with_source(svc, topic, pages, lang, ud):
     return source_context
 
 def get_image(query):
-    """Internetdan mavzuga mos rasm olish"""
+    """Internetdan mavzuga mos rasm olish — Pixabay API"""
     try:
         import hashlib, time
-        search_q = requests.utils.quote(query[:60])
+        # Mavzuni inglizchaga tarjima qilish
+        try:
+            en_q = claude(f"Translate to 2-3 English words only (no explanation): {query}", max_tok=15)
+            en_q = en_q.strip().split("\n")[0][:40]
+        except:
+            en_q = query[:40]
+        
+        search_q = requests.utils.quote(en_q)
+        
+        # 1. Pixabay (bepul, API key shart emas)
+        pixabay_key = os.environ.get("PIXABAY_KEY", "")
+        if pixabay_key:
+            r = requests.get(
+                f"https://pixabay.com/api/?key={pixabay_key}&q={search_q}"
+                f"&image_type=photo&orientation=horizontal&min_width=800&per_page=5&safesearch=true",
+                timeout=10)
+            if r.status_code == 200:
+                hits = r.json().get("hits", [])
+                if hits:
+                    import random
+                    hit = random.choice(hits[:3])
+                    img_url = hit.get("webformatURL", "")
+                    if img_url:
+                        ir = requests.get(img_url, timeout=15)
+                        if ir.status_code == 200 and len(ir.content) > 5000:
+                            buf = BytesIO(ir.content); buf.seek(0)
+                            return buf
+        
+        # 2. Unsplash (agar kalit bo'lsa)
         if UNSPLASH_KEY:
             headers = {"Authorization": f"Client-ID {UNSPLASH_KEY}"}
             r = requests.get(
-                f"https://api.unsplash.com/photos/random?query={search_q}&orientation=landscape",
-                headers=headers, timeout=15)
+                f"https://api.unsplash.com/search/photos?query={search_q}&per_page=5&orientation=landscape",
+                headers=headers, timeout=10)
             if r.status_code == 200:
-                img_url = r.json().get("urls", {}).get("regular", "")
-                if img_url:
-                    ir = requests.get(img_url, timeout=15)
-                    if ir.status_code == 200 and len(ir.content) > 5000:
-                        buf = BytesIO(ir.content); buf.seek(0)
-                        return buf
-        seed = int(hashlib.md5((query + str(time.time())).encode()).hexdigest()[:8], 16) % 9999
-        r2 = requests.get(
-            f"https://source.unsplash.com/800x500/?{search_q}&sig={seed}",
-            timeout=15, allow_redirects=True)
-        if r2.status_code == 200 and len(r2.content) > 5000:
-            buf2 = BytesIO(r2.content); buf2.seek(0); return buf2
+                results = r.json().get("results", [])
+                if results:
+                    img_url = results[0].get("urls", {}).get("regular", "")
+                    if img_url:
+                        ir = requests.get(img_url, timeout=15)
+                        if ir.status_code == 200 and len(ir.content) > 5000:
+                            buf = BytesIO(ir.content); buf.seek(0)
+                            return buf
+        
+        # 3. Fallback - rasm topilmasa None qaytarish
+        return None
+        
     except Exception as e:
         logger.warning(f"Rasm olishda xato: {e}")
     return None
@@ -1791,43 +1819,74 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
         except: pass
 
         if sn == 0:
-            # 1-SLAYD: Mavzu va muallif ma'lumotlari
-            tb = sl.shapes.add_textbox(Inches(1), Inches(1.0), Inches(11.33), Inches(2.8))
-            tf = tb.text_frame; tf.word_wrap = True
-            p = tf.paragraphs[0]; p.text = topic
-            p.font.size = Pt(36); p.font.bold = True
-            p.font.color.rgb = tc; p.alignment = PP_ALIGN.CENTER
-
-            # Ajratuvchi chiziq
+            # ── KUCHLI 1-SLAYD DIZAYNI ──
+            # Chap panel
             try:
-                sep = sl.shapes.add_shape(1, Inches(3), Inches(3.9), Inches(7.33), Inches(0.06))
-                sep.fill.solid(); sep.fill.fore_color.rgb = acc; sep.line.fill.background()
+                lp = sl.shapes.add_shape(1, Inches(0), Inches(0), Inches(4.2), Inches(7.5))
+                lp.fill.solid(); lp.fill.fore_color.rgb = acc
+                lp.fill.fore_color.transparency = 0.2; lp.line.fill.background()
             except: pass
-
+            # Diagonal accent
+            try:
+                da = sl.shapes.add_shape(1, Inches(4.0), Inches(0), Inches(0.18), Inches(7.5))
+                da.fill.solid(); da.fill.fore_color.rgb = acc; da.line.fill.background()
+            except: pass
+            # O'ng yuqori dekorativ doira
+            try:
+                dc = sl.shapes.add_shape(9, Inches(9), Inches(-2), Inches(6), Inches(6))
+                dc.fill.solid(); dc.fill.fore_color.rgb = tc
+                dc.fill.fore_color.transparency = 0.92; dc.line.fill.background()
+            except: pass
+            # Katta sarlavha
+            short_topic = topic if len(topic) <= 55 else topic[:52] + "..."
+            tb = sl.shapes.add_textbox(Inches(4.5), Inches(1.0), Inches(8.5), Inches(3.0))
+            tf = tb.text_frame; tf.word_wrap = True
+            p = tf.paragraphs[0]; p.text = short_topic
+            p.font.size = Pt(36 if len(short_topic) < 35 else 28)
+            p.font.bold = True; p.font.color.rgb = tc
+            # Hook gap
+            hook_map = {"uz": "Bilimni chuqurlashtiring, kelajakni quching",
+                        "ru": "Углубите знания, постройте будущее",
+                        "en": "Deepen knowledge, build the future"}
+            hook = hook_map.get(ud.get("lang","uz"), hook_map["uz"])
+            tb_h = sl.shapes.add_textbox(Inches(4.5), Inches(4.1), Inches(8.5), Inches(0.6))
+            p_h = tb_h.text_frame.paragraphs[0]
+            p_h.text = hook; p_h.font.size = Pt(15); p_h.font.italic = True
+            p_h.font.color.rgb = txc
+            # Separator
+            try:
+                sp = sl.shapes.add_shape(1, Inches(4.5), Inches(4.85), Inches(7.5), Inches(0.05))
+                sp.fill.solid(); sp.fill.fore_color.rgb = acc; sp.line.fill.background()
+            except: pass
             # Muallif ma'lumotlari
             info_lines = []
             if ud.get("full_name"): info_lines.append(f"Muallif: {ud['full_name']}")
             if ud.get("subject"): info_lines.append(f"Fan: {ud['subject']}")
             if ud.get("university"): info_lines.append(f"Universitet: {ud['university']}")
-            if ud.get("faculty"): info_lines.append(f"Fakultet: {ud['faculty']}")
-            if ud.get("year"): info_lines.append(f"Kurs: {ud['year']}")
             if ud.get("teacher"): info_lines.append(f"O'qituvchi: {ud['teacher']}")
-            if ud.get("city"): info_lines.append(f"Shahar: {ud['city']}")
             info_lines.append(datetime.now().strftime("%Y-yil"))
-
             if info_lines:
-                tb2 = sl.shapes.add_textbox(Inches(1), Inches(4.1), Inches(11.33), Inches(2.8))
+                tb2 = sl.shapes.add_textbox(Inches(4.5), Inches(5.0), Inches(8.5), Inches(2.2))
                 tf2 = tb2.text_frame; tf2.word_wrap = True; first2 = True
                 for ln_txt in info_lines:
                     p2 = tf2.paragraphs[0] if first2 else tf2.add_paragraph(); first2 = False
-                    p2.text = ln_txt; p2.font.size = Pt(17); p2.font.color.rgb = txc
-                    p2.alignment = PP_ALIGN.CENTER; p2.space_before = Pt(3)
+                    p2.text = ln_txt; p2.font.size = Pt(14)
+                    p2.font.color.rgb = txc; p2.space_before = Pt(3)
+            # Chap panel matni
+            try:
+                tb_s = sl.shapes.add_textbox(Inches(0.2), Inches(2.5), Inches(3.7), Inches(2.5))
+                tf_s = tb_s.text_frame; tf_s.word_wrap = True
+                p_s = tf_s.paragraphs[0]
+                p_s.text = (ud.get("subject") or topic)[:45]
+                p_s.font.size = Pt(14); p_s.font.bold = True
+                p_s.font.color.rgb = tc; p_s.alignment = PP_ALIGN.CENTER
+            except: pass
 
         elif sn == 1 and any(w in title.upper() for w in ["REJA", "PLAN", "MUNDARIJA", "CONTENT"]):
             # 2-SLAYD: REJALAR
             tb = sl.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(12.33), Inches(1.1))
             tf = tb.text_frame; tf.word_wrap = True
-            p = tf.paragraphs[0]; p.text = "📋  REJALAR"
+            p = tf.paragraphs[0]; p.text = "📋  REJA"
             p.font.size = Pt(34); p.font.bold = True; p.font.color.rgb = tc
             p.alignment = PP_ALIGN.CENTER
             try:
@@ -1892,16 +1951,13 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                         p2.font.color.rgb = txc
                         p2.space_before = Pt(3)
 
-                # Diagramma qo'shish (agar matnda bo'lsa)
+                # Diagramma qo'shish (faqat [DIAGRAMMA:] formati bo'lsa)
                 full_slide_text = " ".join(bullets)
                 diag_data = parse_diagram_data(full_slide_text)
-                if diag_data:
-                    has_img_for_diag = has_img
-                    acc_color = acc
-                    txt_color = txc
+                if diag_data and len(diag_data[0].get("data", [])) >= 2:
                     try:
-                        add_diagram_to_slide(sl, topic, title, full_slide_text, 
-                                           diag_data, acc_color, txt_color, has_img_for_diag)
+                        add_diagram_to_slide(sl, topic, title, full_slide_text,
+                                           diag_data, acc, txc, has_img)
                     except Exception as de:
                         logger.warning(f"Diagram error: {de}")
 
