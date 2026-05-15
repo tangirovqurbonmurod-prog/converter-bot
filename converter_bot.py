@@ -3185,6 +3185,21 @@ def cb(call):
         bot.send_message(uid, t(uid, "menu"), reply_markup=main_kb(uid))
         return
 
+    # Noop
+    if d == "noop":
+        try: bot.answer_callback_query(call.id)
+        except: pass
+        return
+
+    # Diagramma tanlash
+    if d.startswith("diag:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
+        UD.setdefault(uid, {})["with_diagram"] = (d == "diag:yes")
+        sst(uid, "prez_img")
+        bot.send_message(uid, "🖼 Prezentatsiyaga rasm qo'shmoqchimisiz?", reply_markup=img_choice_kb())
+        return
+
     # Menyu
     if d == "bk":
         cst(uid)
