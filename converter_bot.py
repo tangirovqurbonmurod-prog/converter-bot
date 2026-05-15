@@ -465,43 +465,31 @@ def clean_text(text):
 # MAZMUN YARATISH
 # ============================================================
 def gen_prez(topic, slides, lang, ud={}, plans=5):
-    """Prezentatsiya mazmuni yaratish — SLAYD N: formatida"""
+    """Prezentatsiya mazmuni yaratish"""
     ln = LN.get(lang, "o'zbek")
     info = build_info(ud)
     subject = f"\nFan: {ud['subject']}" if ud.get('subject') else ""
-
     prompt = (
-        f"Mavzu: {topic}\nSlaydlar soni: {slides}\n{info}{subject}\n\n"
-        f"QUYIDAGI FORMATDA YOZ. HAR SLAYD 'SLAYD N:' BILAN BOSHLANSIN:\n\n"
-        f"SLAYD 1: {topic}\n\n"
-        f"SLAYD 2: REJALAR\n"
-        f"1. Birinchi bo'lim\n"
-        f"2. Ikkinchi bo'lim\n"
-        f"3. Uchinchi bo'lim\n\n"
-        f"SLAYD 3: [Birinchi bo'lim nomi]\n"
-        f"[4-6 ta aniq fakt, raqam va statistika]\n\n"
-        f"SLAYD 4: [Ikkinchi bo'lim nomi]\n"
-        f"[4-6 ta aniq fakt, raqam va statistika]\n\n"
-        f"... shunday davom et ...\n\n"
-        f"SLAYD {slides}: XULOSA\n"
-        f"[Asosiy xulosalar]\n"
-        f"Foydalanilgan adabiyotlar: 1. ... 2. ... 3. ...\n\n"
-        f"TALABLAR:\n"
-        f"1. Har slayd 'SLAYD N:' bilan boshlansin — MAJBURIY!\n"
-        f"2. Jami {slides} ta slayd bo'lsin\n"
-        f"3. Har slaydda aniq raqamlar va statistika bo'lsin\n"
-        f"4. Faqat ilmiy manbalardan ma'lumot\n"
-        f"5. Hech qanday **, ##, * belgisi ishlatilmasin\n"
-        f"6. Imlo 100% to'g'ri bo'lsin"
+        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nTil: {ln}\n{info}{subject}\n\n"
+        f"QOIDA: Har slayd SLAYD N: bilan boshlansin. Markdown taqiqlangan. Til: {ln}\n\n"
+        f"SLAYD 1: {topic}\n"
+        f"[kirish matni]\n\n"
+        f"SLAYD 2: Reja\n"
+        f"1. Birinchi bolim\n"
+        f"2. Ikkinchi bolim\n\n"
+        f"SLAYD 3: [sarlavha]\n"
+        f"[4-5 ta fakt]\n\n"
+        f"SLAYD {slides}: Xulosa\n"
+        f"[xulosalar. Jami {slides} ta slayd bo'lsin]"
     )
     system = (
-        f"Sen professional {ln} prezentatsiya mutaxassisisanm. "
-        f"'SLAYD N:' formatini qat'iy ushlab turasan. "
-        f"Markdown belgisi ishlatmaysan. Imlo xatosiz yozasan."
+        f"Sen prezentatsiya yaratuvchisan. "
+        f"SLAYD N: formatini QATIY ushla. "
+        f"Markdown belgisi ISHLATMA. Til: {ln}."
     )
     result = claude(prompt, system, 4000, model=SONNET_MODEL)
-    return result.replace("**","").replace("## ","").replace("# ","").replace("##","").replace("#","")
-
+    result = result.replace('**', '').replace('## ', '').replace('# ', '').replace('##', '').replace('#', '')
+    return result
 def gen_doc(svc, topic, pages, lang, ud={}):
     """Hujjat yaratish (referat, kurs ishi, maqola, mustaqil)"""
     ln = LN.get(lang, "o'zbek")
