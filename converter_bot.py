@@ -488,6 +488,7 @@ def gen_prez(topic, slides, lang, ud={}, plans=5):
         f"Markdown belgisi ISHLATMA. Til: {ln}."
     )
     result = claude(prompt, system, 4000, model=SONNET_MODEL)
+    logger.info(f'PREZ_RESULT: {result[:800]}')
     result = result.replace('**', '').replace('## ', '').replace('# ', '').replace('##', '').replace('#', '')
     return result
 def gen_doc(svc, topic, pages, lang, ud={}):
