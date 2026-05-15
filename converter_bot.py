@@ -710,8 +710,8 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
         line = line.strip()
         if not line: continue
         ul = line.upper()
-        is_slide = (ul.startswith("SLAYD") or ul.startswith("SLIDE") or ul.startswith("СЛАЙД") or re.match(r'^(SLAYD|SLIDE|СЛАЙД)\s*\d+', ul)) and ":" in line
-                if is_slide:
+        is_slide = (ul.startswith("SLAYD") or ul.startswith("SLIDE") or ul.startswith("СЛАЙД")) and ":" in line
+        if is_slide:
             if cur_t is not None:
                 slides.append((cur_t, cur_b[:]))
             cur_t = line.split(":", 1)[1].strip()
@@ -719,13 +719,7 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
         else:
             b = re.sub(r'^[-•►▸*\s]+', '', line)
             if b: cur_b.append(b)
-if not slides or len(slides) < 2:
-            # Agar slayd topilmasa, \n\n bo'yicha bo'lamiz
-            parts = [p.strip() for p in clean.split("\n\n") if p.strip()]
-            if len(parts) > 1:
-                slides = [(parts[0][:80], parts[1:])] if len(parts) == 2 else [(p.split("\n")[0][:80], p.split("\n")[1:]) for p in parts if p]
-            else:
-                slides = [(topic, [clean[:200]])]
+    if cur_t: slides.append((cur_t, cur_b))
     if not slides: slides = [(topic, [clean[:200]])]
 
     for sn, (title, bullets) in enumerate(slides):
