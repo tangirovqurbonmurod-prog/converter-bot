@@ -889,67 +889,68 @@ def clean_text(text):
 # MAZMUN YARATISH
 # ============================================================
 def gen_prez(topic, slides, lang, ud={}, plans=5):
-    """Prezentatsiya mazmuni yaratish — SLAYD N: formatida, har slaydda 250-350 so'z"""
+    """Prezentatsiya mazmuni yaratish"""
     ln = LN.get(lang, "o'zbek")
     info = build_info(ud)
     subject = f"\nFan: {ud['subject']}" if ud.get('subject') else ""
-    book = f"\nManba kitob: {ud['book_name']}" if ud.get('book_name') else ""
-    
-    # Web search for real data
-    web_info = ""
+    book = f"\nManba: {ud['book_name']}" if ud.get('book_name') else ""
+
+    # Web search
+    web_ctx = ""
     try:
-        web_info = web_search_topic(f"{topic} statistics facts data", lang)
+        web_info = web_search_topic(f"{topic} ma'lumotlar statistika", lang)
+        if web_info: web_ctx = f"\n\nQo'shimcha ma'lumot:\n{web_info[:1000]}"
     except: pass
-    
-    web_ctx = f"\n\nInternetdan topilgan ma'lumotlar:\n{web_info[:1500]}" if web_info else ""
-    source_ctx = f"\n\nFoydalaning: {ud['book_name']} kitobi ma'lumotlaridan" if ud.get('book_name') else ""
 
-    prompt = (
-        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nTil: {ln}\n{info}{subject}{book}{web_ctx}{source_ctx}\n\n"
-        f"MUHIM QOIDALAR:\n"
-        f"1. HAR SLAYD AYNAN 'SLAYD N:' bilan boshlansin\n"
-        f"2. Har slaydda KAMIDA 250-350 so'z bo'lsin — bu MAJBURIY\n"
-        f"3. Har slayd to'liq, bir butun ma'lumot bersin — o'rtada to'xtatilmasin\n"
-        f"4. Faqat ilmiy manbalar, tasdiqlangan faktlar\n"
-        f"5. Aniq raqamlar, foizlar, sanalar qo'shing\n"
-        f"6. Hech qanday **, ##, *, # belgisi ishlatilmasin\n"
-        f"7. Imlo va grammatika 100% to'g'ri bo'lsin\n\n"
-        f"FORMAT:\n"
-        f"SLAYD 1: {topic}\n"
-        f"[Kirish — mavzu haqida to'liq, 250+ so'zli matn. Mavzuning ahamiyati, dolzarbligi, tarixi. Asosiy tushunchalar tushuntirish]\n\n"
-        f"SLAYD 2: Reja va maqsad\n"
-        f"[Prezentatsiya rejasi. Har bir bo'lim haqida 2-3 jumlali tushuntirish. Maqsad va vazifalar. 250+ so'z]\n\n"
-        f"SLAYD 3: [Birinchi asosiy bo'lim]\n"
-        f"[250-350 so'zli to'liq ilmiy matn. Aniq faktlar, raqamlar, misollar. Tarixiy ma'lumotlar. Olimlar fikridan iqtiboslar]\n\n"
-        f"... {slides} gacha shu formatda davom et ...\n\n"
-        f"SLAYD {slides}: Xulosa va tavsiyalar\n"
-        f"[Barcha mavzular bo'yicha xulosalar. Amaliy tavsiyalar. Foydalanilgan adabiyotlar ro'yxati. 250+ so'z]"
-    )
-    # Diagramma ko'rsatmasi
-    diagram_instruction = (
-        f"\n\nDIAGRAMMA TALABI:\n"
-        f"Mavzuga mos bo'lsa (statistika, iqtisod, biologiya, tibbiyot, fizika, kimyo va h.k.) "
-        f"BA'ZI slaydlarda diagramma ma'lumotlarini QUYIDAGI FORMATDA qo'shing:\n"
-        f"[DIAGRAMMA: sarlavha | yil1/nom1:raqam1, yil2/nom2:raqam2, ...]\n"
-        f"Masalan: [DIAGRAMMA: O'zbekiston YaIM o'sishi | 2019:5.6, 2020:1.9, 2021:7.4, 2022:5.7]\n"
-        f"Faqat HAQIQIY, tasdiqlangan raqamlardan foydalaning!\n"
-        f"Mavzuga diagramma mos kelmasa, qo'shmang.\n"
-    )
-    prompt = prompt + diagram_instruction
+    # Har slayd uchun sarlavha
+    slide_lines = ""
+    for i in range(1, slides + 1):
+        if i == 1: slide_lines += f"SLAYD 1: {topic}\n"
+        elif i == 2: slide_lines += f"SLAYD 2: Mundarija\n"
+        elif i == slides: slide_lines += f"SLAYD {slides}: Xulosa\n"
+        else: slide_lines += f"SLAYD {i}: [Bo'lim sarlavhasi]\n"
 
-    system = (
-        f"Sen O'zbekistonning eng tajribali {ln} prezentatsiya mutaxassisisisan. "
-        f"Har bir slaydga KAMIDA 250 so'z yozasan — bu qat'iy talab. "
-        f"SLAYD N: formatini o'zgartirmaysan. "
-        f"Markdown belgisi ISHLATMAYSAN. "
-        f"Faqat ilmiy, tasdiqlangan ma'lumotlar yozasan. "
-        f"Raqamlar, sanalar, faktlar — barchasi aniq bo'lsin. "
-        f"[DIAGRAMMA:...] formatida faqat haqiqiy raqamlar bilan diagramma qo'shasan."
-    )
+    prompt = f"""Mavzu: {topic}
+Slaydlar: {slides} ta
+Til: {ln}
+{info}{subject}{book}{web_ctx}
+
+TOPSHIRIQ: Quyidagi {slides} ta slaydni to'liq yoz. HAR SLAYD "SLAYD N:" bilan boshlansin.
+
+{slide_lines}
+QOIDALAR:
+- Har slayd SLAYD N: bilan boshlansin (masalan: SLAYD 1:, SLAYD 2:)
+- Har slaydda 250-300 so'z bo'lsin
+- Haqiqiy faktlar va raqamlar ishlatilsin
+- **, ##, # belgisi ishlatilmasin
+- Iqtisod/statistika bo'lsa: [DIAGRAMMA: nom | label1:son1, label2:son2] qo'shilsin"""
+
+    system = f"""Sen {ln} tilida {slides} ta slayd yozasan.
+QOIDA 1: Har slayd "SLAYD N:" bilan boshlansin — bu MAJBURIY.
+QOIDA 2: Har slaydda 250+ so'z bo'lsin.
+QOIDA 3: Markdown belgisi (**, ##, #) ishlatilmasin.
+QOIDA 4: Jami {slides} ta slayd bo'lsin."""
+
     result = claude(prompt, system, 8000, model=SONNET_MODEL)
-    result = result.replace("**", "").replace("## ", "").replace("# ", "").replace("##", "").replace("#", "")
-    logger.info(f"PREZ_RESULT: {result[:300]}")
+
+    if not result or "API xatosi" in result or "Xatolik" in result:
+        logger.error(f"Claude failed in gen_prez: {result}")
+        # Fallback
+        fallback = ""
+        for i in range(1, slides + 1):
+            fallback += f"SLAYD {i}: {topic if i == 1 else f'Bo\'lim {i-1}'}\n"
+            fallback += f"{topic} haqida ma'lumot. Iltimos qayta urinib ko'ring.\n\n"
+        return fallback
+
+    # Markdown tozalash
+    result = result.replace("**", "").replace("## ", "").replace("# ", "").replace("##", "")
+
+    # Log
+    count = len(re.findall(r'SLAYD\s*\d+\s*:', result, re.IGNORECASE))
+    logger.info(f"PREZ: {count} slayd. Start: {result[:150]}")
+
     return result
+
 
 def gen_doc(svc, topic, pages, lang, ud={}):
     """Hujjat yaratish (referat, kurs ishi, maqola, mustaqil)"""
