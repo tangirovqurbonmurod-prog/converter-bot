@@ -18,7 +18,7 @@ DONATE_CARD    = os.environ.get("DONATE_CARD",    "9860 0609 2665 0809")
 DONATE_CLICK   = os.environ.get("DONATE_CLICK",   "+998 94 975 03 04")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 UNSPLASH_KEY   = os.environ.get("UNSPLASH_KEY",   "")
-SONNET_MODEL   = "claude-sonnet-4-20250514"
+SONNET_MODEL   = "claude-sonnet-4-5-20251001"
 HAIKU_MODEL    = "claude-haiku-4-5-20251001"
 
 def gp(n, d): return int(os.environ.get(n, str(d)))
