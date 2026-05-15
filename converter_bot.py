@@ -427,6 +427,30 @@ def save_buyurtma(uid, tur, mavzu, fmt, sah, narx, status="done", order_data=Non
         return cur.lastrowid
     except: return None
 
+
+def save_pending_and_notify(uid, svc, topic, fmt, amount, total, ud):
+    """Pul yetmaganda buyurtmani saqlash va xabar yuborish"""
+    order_data = dict(ud)
+    order_data["svc"] = svc
+    save_pending_buyurtma(uid, svc, topic, fmt, amount, total, order_data)
+    bal = get_balance(uid)
+    kb2 = types.InlineKeyboardMarkup(row_width=1)
+    kb2.add(types.InlineKeyboardButton(t(uid, "topup"), callback_data="topup"))
+    kb2.add(types.InlineKeyboardButton("📋 Buyurtmalarim", callback_data="my_orders"))
+    svc_names = {"referat":"📄 Referat","kurs":"📝 Kurs ishi","mustaqil":"📋 Mustaqil ish",
+                 "maqola":"📰 Maqola","prez":"📊 Prezentatsiya","test":"✅ Test"}
+    sl = "slayd" if svc == "prez" else ("savol" if svc == "test" else "bet")
+    bot.send_message(uid,
+        f"💰 *Hisobingizda mablag\' yetarli emas!*\n\n"
+        f"📌 {svc_names.get(svc, svc)}: *{topic}*\n"
+        f"📊 Hajm: {amount} {sl}\n"
+        f"💵 Kerak: *{total:,} so\'m*\n"
+        f"💳 Balans: *{bal:,} so\'m*\n\n"
+        f"✅ Buyurtma *Buyurtmalarim* bo\'limiga saqlandi!\n"
+        f"Hisobni to\'ldirgach, u yerdan davom eting.",
+        parse_mode="Markdown", reply_markup=kb2)
+    cst(uid)
+
 def save_pending_buyurtma(uid, tur, mavzu, fmt, sah, narx, order_data):
     """Yakunlanmagan buyurtmani saqlash"""
     try:
@@ -2071,9 +2095,8 @@ def text_h(msg):
             UD[uid]["total"] = total
             bal = get_balance(uid)
             if bal < total:
-                kb2 = types.InlineKeyboardMarkup()
-                kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-                bot.send_message(uid, t(uid,"no_balance",need=total,bal=bal), reply_markup=kb2); return
+                save_pending_and_notify(uid, svc, UD.get(uid,{}).get("topic",""), "docx", pages, total, UD.get(uid,{}))
+                return
             sst(uid, f"{svc}_lang")
             bot.send_message(uid,
                 f"✅ {pages} bet × {price:,} = *{total:,} so'm*\n\n{t(uid,'ask_lang')}",
@@ -2093,9 +2116,8 @@ def text_h(msg):
             UD[uid]["total"] = total
             bal = get_balance(uid)
             if bal < total:
-                kb2 = types.InlineKeyboardMarkup()
-                kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-                bot.send_message(uid, t(uid,"no_balance",need=total,bal=bal), reply_markup=kb2); return
+                save_pending_and_notify(uid, "test", UD.get(uid,{}).get("topic",""), "txt", count, total, UD.get(uid,{}))
+                return
             sst(uid, "test_lang")
             bot.send_message(uid,
                 f"✅ {count} savol × {PRICE_TEST:,} = *{total:,} so'm*\n\n{t(uid,'ask_lang')}",
@@ -2115,9 +2137,8 @@ def text_h(msg):
             UD[uid]["total"] = total
             bal = get_balance(uid)
             if bal < total:
-                kb2 = types.InlineKeyboardMarkup()
-                kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-                bot.send_message(uid, t(uid,"no_balance",need=total,bal=bal), reply_markup=kb2); return
+                save_pending_and_notify(uid, "prez", UD.get(uid,{}).get("topic",""), "pptx", slides, total, UD.get(uid,{}))
+                return
             sst(uid, "prez_plans")
             bot.send_message(uid,
                 f"✅ {slides} slayd × {PRICE_SLIDE:,} = *{total:,} so'm*\n\n{t(uid,'ask_plans')}",
@@ -2187,6 +2208,8 @@ def cb(call):
 
     # Skip
     if d.startswith("skip:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
         ns = d[5:]
         idx = INFO_STATES.index(ns) if ns in INFO_STATES else -1
         if idx >= 0 and idx < len(INFO_STEPS) - 1:
@@ -2233,9 +2256,8 @@ def cb(call):
         UD[uid]["total"] = total
         bal = get_balance(uid)
         if bal < total:
-            kb2 = types.InlineKeyboardMarkup()
-            kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-            bot.send_message(uid, t(uid,"no_balance",need=total,bal=bal), reply_markup=kb2); return
+            save_pending_and_notify(uid, "prez", ud.get("topic",""), "pptx", slides, total, ud)
+            return
         sst(uid, "prez_plans")
         bot.send_message(uid,
             f"✅ {slides} slayd × {PRICE_SLIDE:,} = *{total:,} so'm*\n\n{t(uid,'ask_plans')}",
@@ -2297,9 +2319,8 @@ def cb(call):
         UD[uid]["total"] = total
         bal = get_balance(uid)
         if bal < total:
-            kb2 = types.InlineKeyboardMarkup()
-            kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-            bot.send_message(uid, t(uid,"no_balance",need=total,bal=bal), reply_markup=kb2); return
+            save_pending_and_notify(uid, "test", ud.get("topic",""), "txt", count, total, ud)
+            return
         sst(uid, "test_lang")
         bot.send_message(uid,
             f"✅ {count} savol × {PRICE_TEST:,} = *{total:,} so'm*\n\n{t(uid,'ask_lang')}",
@@ -2349,9 +2370,8 @@ def cb(call):
             total = ud.get("total", pages * PRICE_PAGE)
             bal = get_balance(uid)
             if bal < total:
-                kb2 = types.InlineKeyboardMarkup()
-                kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-                bot.send_message(uid, t(uid,"no_balance",need=total,bal=bal), reply_markup=kb2); return
+                save_pending_and_notify(uid, svc, topic, fmt, pages, total, ud)
+                return
             deduct(uid, total)
             pm = bot.send_message(uid, t(uid,"preparing"))
             import threading
@@ -2404,19 +2424,8 @@ def cb(call):
         tmpl_name = TEMPLATES.get(str(tmpl_id), TEMPLATES["1"])["name"]
         bal = get_balance(uid)
         if bal < total:
-            # Yakunlanmagan buyurtmani saqlash
-            order_data = dict(ud)
-            order_data["svc"] = "prez"
-            save_pending_buyurtma(uid, "prez", topic, fmt, slides, total, order_data)
-            kb2 = types.InlineKeyboardMarkup(row_width=1)
-            kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-            kb2.add(types.InlineKeyboardButton("📋 Buyurtmalarim", callback_data="my_orders"))
-            bot.send_message(uid,
-                f"💰 Hisobingizda yetarli mablag' yo\'q!\n"
-                f"Kerak: *{total:,} so'm*\nBalans: *{bal:,} so'm*\n\n"
-                f"Hisobni to'ldirgach Buyurtmalarim bo'limidan davom eting.",
-                parse_mode="Markdown", reply_markup=kb2)
-            cst(uid); return
+            save_pending_and_notify(uid, "prez", topic, fmt, slides, total, ud)
+            return
         deduct(uid, total)
         pm = bot.send_message(uid, t(uid,"preparing"))
         user_imgs = UI.get(uid, [])
@@ -2460,9 +2469,8 @@ def cb(call):
         total = ud.get("total", count * PRICE_TEST)
         bal = get_balance(uid)
         if bal < total:
-            kb2 = types.InlineKeyboardMarkup()
-            kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-            bot.send_message(uid, t(uid,"no_balance",need=total,bal=bal), reply_markup=kb2); return
+            save_pending_and_notify(uid, "test", ud.get("topic",""), "txt", ud.get("count",10), total, ud)
+            return
         deduct(uid, total)
         pm = bot.send_message(uid, t(uid,"preparing"))
         import threading
