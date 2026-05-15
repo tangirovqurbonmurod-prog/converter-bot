@@ -399,9 +399,9 @@ def reg_user(uid, uname, fname, lang="uz"):
     cur.execute("SELECT telegram_id FROM users WHERE telegram_id=?", (uid,))
     ex = cur.fetchone()
     if not ex:
-        cur.execute("INSERT INTO users VALUES(?,?,?,?,?,?)",
+        cur.execute("INSERT INTO users VALUES(?,?,?,?,?,?,?)",
             (uid, uname, fname, lang, BONUS_FIRST,
-             datetime.now().strftime("%d.%m.%Y %H:%M")))
+             datetime.now().strftime("%d.%m.%Y %H:%M"), None))
         c.commit(); c.close(); return True
     cur.execute("UPDATE users SET username=?,first_name=? WHERE telegram_id=?",
         (uname, fname, uid))
