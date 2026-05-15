@@ -2912,6 +2912,51 @@ def photo_h(msg):
             parse_mode="Markdown", reply_markup=sub_check_kb())
         return
     state = gst(uid)
+    ud = UD.get(uid, {})
+
+    # To'lov cheki qabul qilish
+    if state == "wait_topup_receipt":
+        req_id = ud.get("topup_req_id")
+        amount = ud.get("topup_amount", 0)
+        user = get_user(uid)
+        fname = user["first_name"] if user else "Noma'lum"
+        uname = user["username"] if user and user.get("username") else "username_yoq"
+
+        # Adminга chek + ma'lumotlar
+        admin_kb = types.InlineKeyboardMarkup(row_width=2)
+        admin_kb.add(
+            types.InlineKeyboardButton(
+                "✅ Tasdiqlash", callback_data=f"topup_ok:{req_id}:{uid}:{amount}"),
+            types.InlineKeyboardButton(
+                "❌ Rad etish", callback_data=f"topup_no:{req_id}:{uid}")
+        )
+        caption = (
+            f"💳 *Yangi to'ldirish so'rovi* #{req_id}\n\n"
+            f"👤 {fname}\n"
+            f"📱 @{uname}\n"
+            f"🆔 `{uid}`\n"
+            f"💰 Summa: *{amount:,} so'm*"
+        )
+        try:
+            bot.send_photo(ADMIN_ID,
+                msg.photo[-1].file_id,
+                caption=caption,
+                parse_mode="Markdown",
+                reply_markup=admin_kb)
+        except Exception as e:
+            logger.error(f"Admin receipt: {e}")
+            bot.send_message(ADMIN_ID, caption,
+                parse_mode="Markdown", reply_markup=admin_kb)
+
+        cst(uid)
+        bot.send_message(uid,
+            f"✅ Chekingiz qabul qilindi!\n\n"
+            f"💰 Summa: *{amount:,} so'm*\n"
+            f"⏳ So'rovingiz ko'rib chiqilmoqda...\n"
+            f"Tez orada hisobingizga tushadi!",
+            parse_mode="Markdown", reply_markup=main_kb(uid))
+        return
+    state = gst(uid)
     ph = msg.photo[-1]
     td = tempfile.mkdtemp()
     try:
@@ -3042,6 +3087,15 @@ def text_h(msg):
     ud = UD.get(uid, {})
 
     reg_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+
+    # Bekor qilish — to'lov jarayonida
+    if text == "❌ Bekor qilish" and gst(uid) == "wait_topup_receipt":
+        req_id = UD.get(uid, {}).get("topup_req_id")
+        if req_id:
+            reject_topup(req_id)
+        cst(uid)
+        bot.send_message(uid, "❌ To'ldirish bekor qilindi.", reply_markup=main_kb(uid))
+        return
 
     # Obuna tekshirish (til tanlash va /start bundan mustasno)
     skip_sub = [t_val for lang in ["uz","ru","en"] for t_val in [
@@ -3762,34 +3816,23 @@ def cb(call):
         try: bot.delete_message(uid, call.message.message_id)
         except: pass
         amount = int(d[10:])
+        # So'rovni saqlab, foydalanuvchiga to'lov ma'lumotlarini ko'rsatamiz
         req_id = save_topup_request(uid, amount)
-        user = get_user(uid)
-        uname = user["username"] if user and user.get("username") else ""
-        fname = user["first_name"] if user and user.get("first_name") else "Noma'lum"
-        # Adminga xabar
-        admin_kb = types.InlineKeyboardMarkup(row_width=2)
-        admin_kb.add(
-            types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"topup_ok:{req_id}:{uid}:{amount}"),
-            types.InlineKeyboardButton("❌ Rad etish", callback_data=f"topup_no:{req_id}:{uid}")
-        )
-        try:
-            bot.send_message(ADMIN_ID,
-                f"💳 *Yangi to'ldirish so'rovi* #{req_id}\n\n"
-                f"👤 Foydalanuvchi: {fname}\n"
-                f"📱 Username: @{uname}\n"
-                f"🆔 ID: `{uid}`\n"
-                f"💰 Summa: *{amount:,} so'm*\n\n"
-                f"Tasdiqlash uchun quyidagi tugmani bosing:",
-                parse_mode="Markdown", reply_markup=admin_kb)
-        except Exception as e:
-            logger.error(f"Admin topup notify: {e}")
+        UD.setdefault(uid, {})["topup_req_id"] = req_id
+        UD[uid]["topup_amount"] = amount
+        sst(uid, "wait_topup_receipt")
         bot.send_message(uid,
-            f"✅ So'rovingiz qabul qilindi!\n\n"
-            f"💰 Summa: *{amount:,} so'm*\n"
-            f"📋 So'rov raqami: #{req_id}\n\n"
-            f"Admin tekshirib, hisobingizni to'ldiradi.\n"
-            f"Odatda 1-24 soat ichida amalga oshiriladi.",
-            parse_mode="Markdown", reply_markup=main_kb(uid))
+            f"💳 *To'lov ma'lumotlari*\n\n"
+            f"💰 To'lov summasi: *{amount:,} so'm*\n\n"
+            f"💳 Karta raqami:\n`{DONATE_CARD}`\n\n"
+            f"📱 Click/Payme:\n`{DONATE_CLICK}`\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ To'lovni amalga oshirib, *chek rasmini* yuboring.\n"
+            f"So'rovingiz *1 daqiqa* ichida ko'rib chiqiladi!",
+            parse_mode="Markdown",
+            reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add(
+                types.KeyboardButton("❌ Bekor qilish")
+            ))
         return
 
     # Admin: tasdiqlash
@@ -3802,20 +3845,34 @@ def cb(call):
         req_id, target_uid, amount = int(parts[1]), int(parts[2]), int(parts[3])
         user_uid, paid_amount = approve_topup(req_id)
         if user_uid:
+            # Xabarni yangilash
             try:
-                bot.edit_message_reply_markup(ADMIN_ID, call.message.message_id,
+                bot.edit_message_caption(
+                    caption=f"✅ *Tasdiqlandi* — {paid_amount:,} so'm → {user_uid}",
+                    chat_id=ADMIN_ID,
+                    message_id=call.message.message_id,
+                    parse_mode="Markdown",
                     reply_markup=types.InlineKeyboardMarkup())
-                bot.send_message(ADMIN_ID, f"✅ #{req_id} tasdiqlandi! {paid_amount:,} so'm → {user_uid}")
+            except:
+                try:
+                    bot.edit_message_reply_markup(ADMIN_ID, call.message.message_id,
+                        reply_markup=types.InlineKeyboardMarkup())
+                except: pass
+            try: bot.answer_callback_query(call.id, f"✅ {paid_amount:,} so'm tasdiqlandi!")
             except: pass
+            # Foydalanuvchiga xabar
             try:
+                new_bal = get_balance(user_uid)
                 bot.send_message(user_uid,
                     f"✅ *Hisobingiz to'ldirildi!*\n\n"
-                    f"💰 *{paid_amount:,} so'm* qo'shildi\n"
-                    f"💳 Joriy balans: *{get_balance(user_uid):,} so'm*",
+                    f"💰 Qo'shildi: *{paid_amount:,} so'm*\n"
+                    f"💳 Joriy balans: *{new_bal:,} so'm*\n\n"
+                    f"Xizmatlarimizdan foydalaning! 🎓",
                     parse_mode="Markdown", reply_markup=main_kb(user_uid))
             except: pass
         else:
-            bot.answer_callback_query(call.id, "❌ So'rov topilmadi yoki allaqachon bajarilgan!")
+            try: bot.answer_callback_query(call.id, "❌ So'rov topilmadi!")
+            except: pass
         return
 
     # Admin: rad etish
