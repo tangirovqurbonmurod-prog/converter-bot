@@ -1507,7 +1507,7 @@ TEMPLATES_30 = {
 
 def draw_minimalist_clean(sl, tmpl):
     """Toza minimalist - ingichka chiziqlar"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     # Pastki chiziq
     try:
         bar = sl.shapes.add_shape(1, Inches(0), Inches(6.9), Inches(13.33), Inches(0.1))
@@ -1521,7 +1521,7 @@ def draw_minimalist_clean(sl, tmpl):
 
 def draw_minimalist_line(sl, tmpl):
     """Ko'k chiziq - chapda vertikal chiziq"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     try:
         bar = sl.shapes.add_shape(1, Inches(0), Inches(0), Inches(0.12), Inches(7.5))
         bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
@@ -1533,7 +1533,7 @@ def draw_minimalist_line(sl, tmpl):
 
 def draw_dark_elegant(sl, tmpl):
     """Qora elegant - oltin chiziqlar"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     try:
         # Yuqori chiziq
         bar = sl.shapes.add_shape(1, Inches(0.3), Inches(0.05), Inches(12.7), Inches(0.06))
@@ -1562,7 +1562,7 @@ def draw_gradient_ocean(sl, tmpl):
 
 def draw_geometric_blue(sl, tmpl):
     """Ko'k geometrik - uchburchaklar"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     try:
         # O'ng uchda uchburchak
         from pptx.util import Pt as _Pt
@@ -1580,7 +1580,7 @@ def draw_geometric_blue(sl, tmpl):
 
 def draw_geometric_gold(sl, tmpl):
     """Oltin geometrik - diagonal shakllar"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     try:
         # Diagonal chiziqlar
         for i in range(3):
@@ -1605,7 +1605,7 @@ def draw_geometric_mosaic(sl, tmpl):
 
 def draw_corporate_navy(sl, tmpl):
     """Navy korporativ - chapda rangli panel"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     try:
         # Chapda tor panel
         panel = sl.shapes.add_shape(1, Inches(0), Inches(0), Inches(0.8), Inches(7.5))
@@ -1617,7 +1617,7 @@ def draw_corporate_navy(sl, tmpl):
 
 def draw_corporate_steel(sl, tmpl):
     """Temir - metallik ko'rinish"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     try:
         bar = sl.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.33), Inches(0.15))
         bar.fill.solid(); bar.fill.fore_color.rgb = acc; bar.line.fill.background()
@@ -1647,7 +1647,7 @@ def draw_creative_wave(sl, tmpl):
 
 def draw_starnight(sl, tmpl):
     """Yulduzli tun - kichik doiralar"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     import random
     random.seed(42)
     try:
@@ -1663,7 +1663,7 @@ def draw_starnight(sl, tmpl):
 
 def draw_academic(sl, tmpl):
     """Akademik - ramka"""
-    acc = rgb(*tmpl["accent"])
+    acc = rgb(*tmpl.get("accent", (33,150,243)))
     try:
         for coords in [(Inches(0.2), Inches(0.2), Inches(12.9), Inches(0.05)),
                        (Inches(0.2), Inches(7.2), Inches(12.9), Inches(0.05)),
@@ -1725,7 +1725,9 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
 
     tmpl = TEMPLATES.get(str(tmpl_id), TEMPLATES["1"])
     bg1 = RGBColor(*tmpl["bg1"]); bg2 = RGBColor(*tmpl["bg2"])
-    tc = RGBColor(*tmpl["title"]); txc = RGBColor(*tmpl["text"]); acc = RGBColor(*tmpl["accent"])
+    tc = RGBColor(*tmpl.get("title_c", tmpl.get("title", (255,255,255))))
+    txc = RGBColor(*tmpl.get("text_c", tmpl.get("text", (220,220,220))))
+    acc = RGBColor(*tmpl.get("accent", (255,200,0)))
 
     prs = Presentation()
     prs.slide_width = Inches(13.33)
@@ -1993,9 +1995,9 @@ def make_html(content, topic, tmpl_id, ud={}):
     tmpl = TEMPLATES.get(str(tmpl_id), TEMPLATES["1"])
     bg1 = "#{:02x}{:02x}{:02x}".format(*tmpl["bg1"])
     bg2 = "#{:02x}{:02x}{:02x}".format(*tmpl["bg2"])
-    th = "#{:02x}{:02x}{:02x}".format(*tmpl["title"])
-    tx = "#{:02x}{:02x}{:02x}".format(*tmpl["text"])
-    ac = "#{:02x}{:02x}{:02x}".format(*tmpl["accent"])
+    th = "#{:02x}{:02x}{:02x}".format(*tmpl.get("title_c", tmpl.get("title", (255,255,255))))
+    tx = "#{:02x}{:02x}{:02x}".format(*tmpl.get("text_c", tmpl.get("text", (220,220,220))))
+    ac = "#{:02x}{:02x}{:02x}".format(*tmpl.get("accent", (255,200,0)))
 
     clean = content.replace("**","").replace("##","").replace("#","")
     slides = []; cur_t = topic; cur_b = []
