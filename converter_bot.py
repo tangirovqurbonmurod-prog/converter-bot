@@ -1746,6 +1746,25 @@ TEMPLATES = TEMPLATES_30
 # ============================================================
 # PPTX YARATISH
 # ============================================================
+
+def get_contrast_color(bg_rgb, text_rgb):
+    """Fon va matn rangi bir xil bo'lsa, kontrastli rang qaytaradi"""
+    def luminance(r, g, b):
+        return 0.299 * r + 0.587 * g + 0.114 * b
+    
+    bg_lum = luminance(bg_rgb.red, bg_rgb.green, bg_rgb.blue)
+    txt_lum = luminance(text_rgb.red, text_rgb.green, text_rgb.blue)
+    
+    # Agar farq kam bo'lsa (kontrast past)
+    diff = abs(bg_lum - txt_lum)
+    if diff < 60:
+        # Fon qoraga yaqin bo'lsa - oq rang
+        if bg_lum < 128:
+            return RGBColor(255, 255, 255)
+        else:
+            return RGBColor(20, 20, 20)
+    return text_rgb
+
 def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
     from pptx import Presentation
     from pptx.util import Inches, Pt
@@ -1831,11 +1850,11 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                 da = sl.shapes.add_shape(1, Inches(4.0), Inches(0), Inches(0.18), Inches(7.5))
                 da.fill.solid(); da.fill.fore_color.rgb = acc; da.line.fill.background()
             except: pass
-            # O'ng yuqori dekorativ doira
+            # O'ng yuqori kichik doira (dekorativ)
             try:
-                dc = sl.shapes.add_shape(9, Inches(9), Inches(-2), Inches(6), Inches(6))
-                dc.fill.solid(); dc.fill.fore_color.rgb = tc
-                dc.fill.fore_color.transparency = 0.92; dc.line.fill.background()
+                dc = sl.shapes.add_shape(9, Inches(11.5), Inches(5.5), Inches(2.5), Inches(2.5))
+                dc.fill.solid(); dc.fill.fore_color.rgb = acc
+                dc.fill.fore_color.transparency = 0.85; dc.line.fill.background()
             except: pass
             # Katta sarlavha
             short_topic = topic if len(topic) <= 55 else topic[:52] + "..."
@@ -1948,16 +1967,25 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                             p2.text = b; p2.font.size = Pt(13)
                         else:
                             p2.text = f"▸  {b}"; p2.font.size = Pt(14)
-                        p2.font.color.rgb = txc
+                        p2.font.color.rgb = get_contrast_color(bg1, txc)
                         p2.space_before = Pt(3)
 
                 # Diagramma qo'shish (faqat [DIAGRAMMA:] formati bo'lsa)
                 full_slide_text = " ".join(bullets)
+                # [DIAGRAMMA:...] matndan tozalash
+                clean_bullets = []
                 diag_data = parse_diagram_data(full_slide_text)
+                for b in normal_b:
+                    if not b.strip().upper().startswith("[DIAGRAMMA"):
+                        clean_bullets.append(b)
+                normal_b = clean_bullets
+                
                 if diag_data and len(diag_data[0].get("data", [])) >= 2:
                     try:
+                        # Diagramma uchun joy - pastki 35% (matn ustida emas)
+                        d_x, d_y, d_w, d_h = 0.4, 4.5, 12.5, 2.8
                         add_diagram_to_slide(sl, topic, title, full_slide_text,
-                                           diag_data, acc, txc, has_img)
+                                           diag_data, acc, get_contrast_color(bg1, txc), False)
                     except Exception as de:
                         logger.warning(f"Diagram error: {de}")
 
@@ -3241,8 +3269,17 @@ def cb(call):
             lang = d.split(":")[1]
             UD.setdefault(uid, {})["lang"] = lang
             if svc == "prez":
-                sst(uid, "prez_img")
-                bot.send_message(uid, "🖼 Prezentatsiyaga rasm qo'shmoqchimisiz?", reply_markup=img_choice_kb())
+                sst(uid, "prez_diag")
+                diag_kb = types.InlineKeyboardMarkup(row_width=1)
+                diag_kb.add(
+                    types.InlineKeyboardButton("📊 Ha, diagramma qo'shilsin", callback_data="diag:yes"),
+                    types.InlineKeyboardButton("📝 Yo'q, faqat matn", callback_data="diag:no")
+                )
+                bot.send_message(uid,
+                    "📊 *Diagramma va infografika qo'shilsinmi?*\n\n"
+                    "Agar mavzuda raqamli statistik ma'lumotlar bo'lsa diagramma qo'shiladi\n"
+                    "(iqtisod, biologiya, tibbiyot, fizika va h.k.)",
+                    parse_mode="Markdown", reply_markup=diag_kb)
             elif svc == "test":
                 sst(uid, "test_confirm")
                 count = ud.get("count", 10)
