@@ -2929,11 +2929,27 @@ def text_h(msg):
         tur_n = {"referat":"📄 Referat","kurs":"📝 Kurs ishi","mustaqil":"📋 Mustaqil ish",
                  "maqola":"📰 Maqola","prez":"📊 Prezentatsiya","test":"✅ Test"}
         txt2 = t(uid, "orders_title")
-        for i, (tur, mavzu, fmt, sah, narx, sana) in enumerate(rows, 1):
+        kb_o = types.InlineKeyboardMarkup(row_width=1)
+        has_pending = False
+        for row in rows:
+            # row: id, tur, mavzu, fmt, sah, narx, status, sana
+            if len(row) == 8:
+                order_id, tur, mavzu, fmt, sah, narx, status, sana = row
+            else:
+                # Eski format
+                tur, mavzu, fmt, sah, narx, sana = row[:6]
+                order_id, status = None, "done"
             tur_lbl = tur_n.get(tur, tur)
             sl = t(uid,"slide_pages") if tur=="prez" else (t(uid,"savol_pages") if tur=="test" else t(uid,"bet_pages"))
-            txt2 += f"{i}. {tur_lbl}\n📌 {mavzu}\n📁 {fmt.upper()} | {sah} {sl} | 💰 {int(narx):,} so'm\n🕐 {sana}\n\n"
-        bot.send_message(uid, txt2, parse_mode="Markdown", reply_markup=main_kb(uid)); return
+            status_icon = "⏳" if status == "pending" else "✅"
+            txt2 += f"{status_icon} {tur_lbl}\n📌 {mavzu}\n📁 {fmt.upper()} | {sah} {sl} | 💰 {int(narx):,} so'm\n🕐 {sana}\n\n"
+            if status == "pending" and order_id:
+                has_pending = True
+                kb_o.add(types.InlineKeyboardButton(
+                    f"▶️ Davom ettirish: {mavzu[:25]}", callback_data=f"resume:{order_id}"))
+        if not has_pending:
+            kb_o = main_kb(uid)
+        bot.send_message(uid, txt2, parse_mode="Markdown", reply_markup=kb_o); return
 
     # Donat
     donat_btns = [TEXTS[l]["btn_donat"] for l in ["uz","ru","en"]]
