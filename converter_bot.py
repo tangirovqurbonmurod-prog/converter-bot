@@ -164,6 +164,7 @@ TEXTS = {
         "btn_konv": "🔄 Konvertatsiya",
         "btn_balans": "💰 Balans",
         "btn_orders": "📦 Buyurtmalarim",
+        "btn_referral": "👥 Referal",
         "btn_donat": "💝 Donat",
         "btn_help": "❓ Yordam",
         "btn_admin": "👨‍💼 Admin",
@@ -228,6 +229,7 @@ TEXTS = {
         "btn_konv": "🔄 Конвертация",
         "btn_balans": "💰 Баланс",
         "btn_orders": "📦 Мои заказы",
+        "btn_referral": "👥 Реферал",
         "btn_donat": "💝 Донат",
         "btn_help": "❓ Помощь",
         "btn_admin": "👨‍💼 Админ",
@@ -292,6 +294,7 @@ TEXTS = {
         "btn_konv": "🔄 Convert",
         "btn_balans": "💰 Balance",
         "btn_orders": "📦 My Orders",
+        "btn_referral": "👥 Referral",
         "btn_donat": "💝 Donate",
         "btn_help": "❓ Help",
         "btn_admin": "👨‍💼 Admin",
@@ -339,6 +342,22 @@ def init_db():
     except: pass
     cur.execute("""CREATE TABLE IF NOT EXISTS sub_channels(
         channel_id TEXT PRIMARY KEY, channel_name TEXT, active INTEGER DEFAULT 1)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS referrals(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        referrer_id INTEGER,
+        referred_id INTEGER UNIQUE,
+        bonus_paid INTEGER DEFAULT 0,
+        created_at TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS topup_requests(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER,
+        amount INTEGER,
+        status TEXT DEFAULT 'pending',
+        admin_note TEXT,
+        created_at TEXT)""")
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER DEFAULT NULL")
+    except: pass
     c.commit(); c.close()
 
 import json
@@ -418,14 +437,24 @@ def log_act(uid, action, detail="", income=0):
 def save_buyurtma(uid, tur, mavzu, fmt, sah, narx, status="done", order_data=None):
     try:
         c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        # Bu foydalanuvchining birinchi buyurtmasimi?
+        cur.execute("SELECT COUNT(*) FROM buyurtmalar WHERE telegram_id=? AND status='done'", (uid,))
+        is_first = cur.fetchone()[0] == 0
         cur.execute("""INSERT INTO buyurtmalar(telegram_id,tur,mavzu,format,sahifalar,narx,status,order_data,created_at) 
             VALUES(?,?,?,?,?,?,?,?,?)""",
             (uid, tur, mavzu, fmt, str(sah), narx, status,
              json.dumps(order_data or {}, ensure_ascii=False),
              datetime.now().strftime("%d.%m.%Y %H:%M")))
-        c.commit(); c.close()
-        return cur.lastrowid
-    except: return None
+        c.commit()
+        row_id = cur.lastrowid
+        c.close()
+        # Birinchi buyurtmada referal bonus
+        if is_first and status == "done":
+            import threading
+            threading.Thread(target=pay_referral_bonus, args=(uid,), daemon=True).start()
+        return row_id
+    except Exception as e:
+        logger.error(f"save_buyurtma: {e}"); return None
 
 
 def save_pending_and_notify(uid, svc, topic, fmt, amount, total, ud):
@@ -2331,8 +2360,8 @@ def main_kb(uid):
     kb.row(t(uid,"btn_prez"), t(uid,"btn_test"))
     kb.row(t(uid,"btn_imlo"), t(uid,"btn_konv"))
     kb.row(t(uid,"btn_balans"), t(uid,"btn_orders"))
-    kb.row(t(uid,"btn_donat"), t(uid,"btn_help"))
-    kb.add(t(uid,"btn_admin"))
+    kb.row(t(uid,"btn_referral"), t(uid,"btn_donat"))
+    kb.row(t(uid,"btn_help"), t(uid,"btn_admin"))
     return kb
 
 def lang_kb():
@@ -2508,12 +2537,160 @@ def finish_info(uid, ud):
 # ============================================================
 # BUYRUQLAR
 # ============================================================
+
+# ============================================================
+# REFERAL TIZIMI
+# ============================================================
+REFERAL_BONUS = 500  # Har bir do'st uchun bonus
+
+def save_referral(referrer_id, referred_id):
+    """Referal bog'liqligini saqlash"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("SELECT id FROM referrals WHERE referred_id=?", (referred_id,))
+        if cur.fetchone():
+            c.close(); return False
+        cur.execute(
+            "INSERT INTO referrals(referrer_id, referred_id, bonus_paid, created_at) VALUES(?,?,0,?)",
+            (referrer_id, referred_id, datetime.now().strftime("%d.%m.%Y %H:%M")))
+        cur.execute("UPDATE users SET referred_by=? WHERE telegram_id=?",
+            (referrer_id, referred_id))
+        c.commit(); c.close(); return True
+    except Exception as e:
+        logger.error(f"save_referral: {e}"); return False
+
+def pay_referral_bonus(referred_id):
+    """Do'sti birinchi buyurtma qilganda bonus to'lash"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute(
+            "SELECT id, referrer_id FROM referrals WHERE referred_id=? AND bonus_paid=0",
+            (referred_id,))
+        row = cur.fetchone()
+        if not row:
+            c.close(); return
+        ref_id, referrer_id = row
+        # Bonus berish
+        cur.execute("UPDATE users SET balance=balance+? WHERE telegram_id=?",
+            (REFERAL_BONUS, referrer_id))
+        cur.execute("UPDATE referrals SET bonus_paid=1 WHERE id=?", (ref_id,))
+        c.commit(); c.close()
+        # Taklif qilganga xabar
+        try:
+            ref_user = get_user(referred_id)
+            fname = ref_user["first_name"] if ref_user else "Do'stingiz"
+            bot.send_message(referrer_id,
+                f"🎉 *{fname}* sizning taklifingiz orqali birinchi buyurtma berdi!\n"
+                f"💰 *{REFERAL_BONUS:,} so'm* bonus hisobingizga qo'shildi!\n"
+                f"💳 Joriy balans: *{get_balance(referrer_id):,} so'm*",
+                parse_mode="Markdown")
+        except: pass
+        logger.info(f"Referral bonus paid: {referrer_id} <- {referred_id}")
+    except Exception as e:
+        logger.error(f"pay_referral_bonus: {e}")
+
+def get_referral_stats(uid):
+    """Foydalanuvchining referal statistikasi"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id=?", (uid,))
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id=? AND bonus_paid=1", (uid,))
+        paid = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id=? AND bonus_paid=0", (uid,))
+        pending = cur.fetchone()[0]
+        c.close()
+        return total, paid, pending
+    except: return 0, 0, 0
+
+def get_referral_link(uid):
+    """Foydalanuvchi uchun referal havola"""
+    bot_info = bot.get_me()
+    return f"https://t.me/{bot_info.username}?start=ref_{uid}"
+
+# ============================================================
+# BALANS TO'LDIRISH TIZIMI
+# ============================================================
+TOPUP_AMOUNTS = [5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000]
+
+def save_topup_request(uid, amount):
+    """To'ldirish so'rovini saqlash"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute(
+            "INSERT INTO topup_requests(telegram_id, amount, status, created_at) VALUES(?,?,'pending',?)",
+            (uid, amount, datetime.now().strftime("%d.%m.%Y %H:%M")))
+        c.commit()
+        req_id = cur.lastrowid
+        c.close(); return req_id
+    except Exception as e:
+        logger.error(f"save_topup: {e}"); return None
+
+def approve_topup(req_id):
+    """To'ldirish so'rovini tasdiqlash"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("SELECT telegram_id, amount FROM topup_requests WHERE id=? AND status='pending'",
+            (req_id,))
+        row = cur.fetchone()
+        if not row:
+            c.close(); return None, None
+        uid, amount = row
+        cur.execute("UPDATE topup_requests SET status='approved' WHERE id=?", (req_id,))
+        cur.execute("UPDATE users SET balance=balance+? WHERE telegram_id=?", (amount, uid))
+        c.commit(); c.close()
+        return uid, amount
+    except Exception as e:
+        logger.error(f"approve_topup: {e}"); return None, None
+
+def reject_topup(req_id):
+    """To'ldirish so'rovini rad etish"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("SELECT telegram_id FROM topup_requests WHERE id=?", (req_id,))
+        row = cur.fetchone()
+        cur.execute("UPDATE topup_requests SET status='rejected' WHERE id=?", (req_id,))
+        c.commit(); c.close()
+        return row[0] if row else None
+    except: return None
+
+def topup_kb():
+    """Balans to'ldirish miqdor tugmalari"""
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    btns = []
+    for amt in TOPUP_AMOUNTS:
+        btns.append(types.InlineKeyboardButton(
+            f"{amt:,} so'm", callback_data=f"topup_amt:{amt}"))
+    kb.add(*btns)
+    kb.add(types.InlineKeyboardButton("🏠 Menyu", callback_data="bk"))
+    return kb
+
+def referral_kb(uid):
+    """Referal menyu tugmalari"""
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        types.InlineKeyboardButton("🔗 Referal havolam", callback_data="ref:link"),
+        types.InlineKeyboardButton("📊 Statistika", callback_data="ref:stats"),
+        types.InlineKeyboardButton("🏠 Menyu", callback_data="bk")
+    )
+    return kb
+
 @bot.message_handler(commands=["start"])
 def cmd_start(msg):
     uid = msg.from_user.id
     uname = msg.from_user.username or ""
     fname = msg.from_user.first_name or ""
     is_new = reg_user(uid, uname, fname)
+
+    # Referal parametrini tekshirish
+    args = msg.text.split() if msg.text else []
+    if len(args) > 1 and args[1].startswith("ref_") and is_new:
+        try:
+            referrer_id = int(args[1][4:])
+            if referrer_id != uid:
+                save_referral(referrer_id, uid)
+        except: pass
+
     # Obuna tekshirish
     if not check_subscription(uid):
         channels = get_sub_channels()
@@ -2527,10 +2704,12 @@ def cmd_start(msg):
     txt = t(uid, "welcome", name=fname)
     if is_new:
         txt += t(uid, "bonus", amount=BONUS_FIRST)
+        if len(args) > 1 and args[1].startswith("ref_"):
+            txt += "\n\n🎁 Siz taklif orqali keldingiz! Birinchi buyurtmadan so'ng taklif qilgan do'stingiz bonus oladi."
     txt += t(uid, "choose_lang")
     bot.send_message(uid, txt, parse_mode="Markdown", reply_markup=lang_kb())
     if is_new:
-        try: bot.send_message(ADMIN_ID, f"🆕 Yangi foydalanuvchi: {fname} (@{uname}) | ID: {uid}")
+        try: bot.send_message(ADMIN_ID, f"🆕 Yangi: {fname} (@{uname}) | ID: {uid}")
         except: pass
 
 @bot.message_handler(commands=["referat"])
@@ -2916,9 +3095,42 @@ def text_h(msg):
     bal_btns = [TEXTS[l]["btn_balans"] for l in ["uz","ru","en"]]
     if text in bal_btns:
         bal = get_balance(uid)
-        kb2 = types.InlineKeyboardMarkup()
-        kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-        bot.send_message(uid, t(uid, "balance_info", bal=bal), parse_mode="Markdown", reply_markup=kb2); return
+        total_ref, paid_ref, pending_ref = get_referral_stats(uid)
+        ref_link = get_referral_link(uid)
+        txt_bal = (
+            f"💳 *Hisobingiz*\n\n"
+            f"💰 Balans: *{bal:,} so'm*\n"
+            f"👥 Referal: *{paid_ref}* ta (bonus olindi)\n"
+            f"⏳ Kutilmoqda: *{pending_ref}* ta\n\n"
+            f"🔗 Referal havola:\n`{ref_link}`"
+        )
+        kb2 = types.InlineKeyboardMarkup(row_width=1)
+        kb2.add(
+            types.InlineKeyboardButton("💳 Balans to'ldirish", callback_data="topup"),
+            types.InlineKeyboardButton("👥 Referal statistika", callback_data="ref:stats"),
+            types.InlineKeyboardButton("🔗 Referal havolam", callback_data="ref:link")
+        )
+        bot.send_message(uid, txt_bal, parse_mode="Markdown", reply_markup=kb2); return
+
+    # Referal
+    ref_btns = [TEXTS[l].get("btn_referral","") for l in ["uz","ru","en"]]
+    if text in ref_btns and text:
+        total_ref, paid_ref, pending_ref = get_referral_stats(uid)
+        ref_link = get_referral_link(uid)
+        earned = paid_ref * REFERAL_BONUS
+        txt_ref = (
+            f"👥 *Referal tizimi*\n\n"
+            f"🎁 Har bir do'st uchun: *{REFERAL_BONUS:,} so'm*\n"
+            f"📋 Do'st birinchi buyurtma bergandan keyin bonus beriladi\n\n"
+            f"📊 *Statistika:*\n"
+            f"👤 Jami taklif qilganlar: *{total_ref}* ta\n"
+            f"✅ Bonus olindi: *{paid_ref}* ta\n"
+            f"⏳ Kutilmoqda: *{pending_ref}* ta\n"
+            f"💰 Jami topilgan: *{earned:,} so'm*\n\n"
+            f"🔗 *Sizning havolangiz:*\n`{ref_link}`\n\n"
+            f"Bu havolani do'stlaringizga yuboring!"
+        )
+        bot.send_message(uid, txt_ref, parse_mode="Markdown", reply_markup=referral_kb(uid)); return
 
     # Buyurtmalarim
     orders_btns = [TEXTS[l]["btn_orders"] for l in ["uz","ru","en"]]
@@ -3541,11 +3753,122 @@ def cb(call):
         try: bot.delete_message(uid, call.message.message_id)
         except: pass
         bot.send_message(uid,
-            f"💳 *Balans to'ldirish*\n\n"
-            f"💳 Karta: `{DONATE_CARD}`\n"
-            f"🟢 Click: `{DONATE_CLICK}`\n\n"
-            f"To'lovdan keyin admin: {ADMIN_USERNAME}",
-            parse_mode="Markdown"); return
+            "💳 *Balans to'ldirish*\n\nQuyidagi summalardan birini tanlang:",
+            parse_mode="Markdown", reply_markup=topup_kb())
+        return
+
+    # To'ldirish miqdori tanlandi
+    if d.startswith("topup_amt:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
+        amount = int(d[10:])
+        req_id = save_topup_request(uid, amount)
+        user = get_user(uid)
+        uname = user["username"] if user and user.get("username") else ""
+        fname = user["first_name"] if user and user.get("first_name") else "Noma'lum"
+        # Adminga xabar
+        admin_kb = types.InlineKeyboardMarkup(row_width=2)
+        admin_kb.add(
+            types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"topup_ok:{req_id}:{uid}:{amount}"),
+            types.InlineKeyboardButton("❌ Rad etish", callback_data=f"topup_no:{req_id}:{uid}")
+        )
+        try:
+            bot.send_message(ADMIN_ID,
+                f"💳 *Yangi to'ldirish so'rovi* #{req_id}\n\n"
+                f"👤 Foydalanuvchi: {fname}\n"
+                f"📱 Username: @{uname}\n"
+                f"🆔 ID: `{uid}`\n"
+                f"💰 Summa: *{amount:,} so'm*\n\n"
+                f"Tasdiqlash uchun quyidagi tugmani bosing:",
+                parse_mode="Markdown", reply_markup=admin_kb)
+        except Exception as e:
+            logger.error(f"Admin topup notify: {e}")
+        bot.send_message(uid,
+            f"✅ So'rovingiz qabul qilindi!\n\n"
+            f"💰 Summa: *{amount:,} so'm*\n"
+            f"📋 So'rov raqami: #{req_id}\n\n"
+            f"Admin tekshirib, hisobingizni to'ldiradi.\n"
+            f"Odatda 1-24 soat ichida amalga oshiriladi.",
+            parse_mode="Markdown", reply_markup=main_kb(uid))
+        return
+
+    # Admin: tasdiqlash
+    if d.startswith("topup_ok:"):
+        if uid != ADMIN_ID:
+            try: bot.answer_callback_query(call.id, "❌ Ruxsat yo'q!")
+            except: pass
+            return
+        parts = d.split(":")
+        req_id, target_uid, amount = int(parts[1]), int(parts[2]), int(parts[3])
+        user_uid, paid_amount = approve_topup(req_id)
+        if user_uid:
+            try:
+                bot.edit_message_reply_markup(ADMIN_ID, call.message.message_id,
+                    reply_markup=types.InlineKeyboardMarkup())
+                bot.send_message(ADMIN_ID, f"✅ #{req_id} tasdiqlandi! {paid_amount:,} so'm → {user_uid}")
+            except: pass
+            try:
+                bot.send_message(user_uid,
+                    f"✅ *Hisobingiz to'ldirildi!*\n\n"
+                    f"💰 *{paid_amount:,} so'm* qo'shildi\n"
+                    f"💳 Joriy balans: *{get_balance(user_uid):,} so'm*",
+                    parse_mode="Markdown", reply_markup=main_kb(user_uid))
+            except: pass
+        else:
+            bot.answer_callback_query(call.id, "❌ So'rov topilmadi yoki allaqachon bajarilgan!")
+        return
+
+    # Admin: rad etish
+    if d.startswith("topup_no:"):
+        if uid != ADMIN_ID:
+            try: bot.answer_callback_query(call.id, "❌ Ruxsat yo'q!")
+            except: pass
+            return
+        parts = d.split(":")
+        req_id, target_uid = int(parts[1]), int(parts[2])
+        user_uid = reject_topup(req_id)
+        try:
+            bot.edit_message_reply_markup(ADMIN_ID, call.message.message_id,
+                reply_markup=types.InlineKeyboardMarkup())
+            bot.send_message(ADMIN_ID, f"❌ #{req_id} rad etildi.")
+        except: pass
+        if user_uid:
+            try:
+                bot.send_message(user_uid,
+                    f"❌ Afsuski, #{req_id} to'ldirish so'rovingiz rad etildi.\n"
+                    f"Murojaat uchun adminга yozing.",
+                    reply_markup=main_kb(user_uid))
+            except: pass
+        return
+
+    # Referal callbacks
+    if d == "ref:link":
+        try: bot.answer_callback_query(call.id)
+        except: pass
+        ref_link = get_referral_link(uid)
+        bot.send_message(uid,
+            f"🔗 *Sizning referal havolangiz:*\n\n`{ref_link}`\n\n"
+            f"Bu havolani do'stlaringizga yuboring.\n"
+            f"Har biri birinchi buyurtma bergandan so'ng *{REFERAL_BONUS:,} so'm* bonus olasiz!",
+            parse_mode="Markdown")
+        return
+
+    if d == "ref:stats":
+        try: bot.answer_callback_query(call.id)
+        except: pass
+        total_ref, paid_ref, pending_ref = get_referral_stats(uid)
+        earned = paid_ref * REFERAL_BONUS
+        bot.send_message(uid,
+            f"📊 *Referal statistika*\n\n"
+            f"👤 Jami taklif: *{total_ref}* ta\n"
+            f"✅ Bonus olindi: *{paid_ref}* ta\n"
+            f"⏳ Kutilmoqda: *{pending_ref}* ta\n"
+            f"💰 Jami daromad: *{earned:,} so'm*",
+            parse_mode="Markdown", reply_markup=referral_kb(uid))
+        return
+
+    # Eski topup xabari (endi yuklanmaydi)
+    # if d == "topup_old": ...
 
     try: bot.answer_callback_query(call.id)
     except: pass
