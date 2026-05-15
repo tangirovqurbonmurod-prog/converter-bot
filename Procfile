@@ -1,1 +1,1 @@
-"worker: python converter_bot.py" 
+web: python converter_bot.py 

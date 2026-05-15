@@ -1,5 +1,6 @@
-telebot 
+telebot==4.17.0 
 requests 
-python-pptx 
+python-docx 
 reportlab 
 Pillow 
+python-pptx 
