@@ -500,7 +500,7 @@ def gen_prez(topic, slides, lang, ud={}, plans=5):
         f"Markdown belgisi ishlatmaysan. Imlo xatosiz yozasan."
     )
     result = claude(prompt, system, 4000, model=SONNET_MODEL)
-    return clean_text(result)
+    return result.replace("**","").replace("## ","").replace("# ","").replace("##","").replace("#","")
 
 def gen_doc(svc, topic, pages, lang, ud={}):
     """Hujjat yaratish (referat, kurs ishi, maqola, mustaqil)"""
