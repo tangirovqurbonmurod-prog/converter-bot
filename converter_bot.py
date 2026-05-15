@@ -18,7 +18,7 @@ DONATE_CARD    = os.environ.get("DONATE_CARD",    "9860 0609 2665 0809")
 DONATE_CLICK   = os.environ.get("DONATE_CLICK",   "+998 94 975 03 04")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 UNSPLASH_KEY   = os.environ.get("UNSPLASH_KEY",   "")
-SONNET_MODEL   = os.environ.get("SONNET_MODEL", "claude-sonnet-4-5-20251001")
+SONNET_MODEL   = "claude-sonnet-4-20250514"
 HAIKU_MODEL    = "claude-haiku-4-5-20251001"
 
 def gp(n, d): return int(os.environ.get(n, str(d)))
@@ -902,7 +902,13 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                             txt = sh.text_frame.paragraphs[0].text.strip()
                             if txt and len(txt) > 3 and txt != topic:
                                 slide_title = txt; break
-                    img_buf = get_image(f"{slide_title} {topic}"[:60])
+                    # Sarlavhani inglizchaga tarjima qilib qidiramiz
+                    try:
+                        en_query = claude(f"Translate to English (2-3 words only, no explanation): {slide_title} {topic}", max_tok=20)
+                        en_query = en_query.strip().split('\n')[0][:50]
+                    except:
+                        en_query = f"{slide_title} {topic}"[:50]
+                    img_buf = get_image(en_query)
                     if img_buf:
                         if slide_num % 2 == 0:
                             sl2.shapes.add_picture(img_buf, Inches(0.4), Inches(1.7), Inches(12.5), Inches(3.2))
