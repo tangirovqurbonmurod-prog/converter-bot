@@ -329,7 +329,14 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS buyurtmalar(
         id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER,
         tur TEXT, mavzu TEXT, format TEXT, sahifalar TEXT,
-        narx INTEGER, created_at TEXT)""")
+        narx INTEGER, status TEXT DEFAULT 'done', order_data TEXT, created_at TEXT)""")
+    # Eski jadvalga ustun qo'shish (agar yo'q bo'lsa)
+    try:
+        cur.execute("ALTER TABLE buyurtmalar ADD COLUMN status TEXT DEFAULT 'done'")
+    except: pass
+    try:
+        cur.execute("ALTER TABLE buyurtmalar ADD COLUMN order_data TEXT")
+    except: pass
     cur.execute("""CREATE TABLE IF NOT EXISTS sub_channels(
         channel_id TEXT PRIMARY KEY, channel_name TEXT, active INTEGER DEFAULT 1)""")
     c.commit(); c.close()
@@ -408,18 +415,70 @@ def log_act(uid, action, detail="", income=0):
         (uid, action, detail, income, datetime.now().strftime("%d.%m.%Y %H:%M")))
     c.commit(); c.close()
 
-def save_buyurtma(uid, tur, mavzu, fmt, sah, narx):
+def save_buyurtma(uid, tur, mavzu, fmt, sah, narx, status="done", order_data=None):
     try:
         c = sqlite3.connect("edubot.db"); cur = c.cursor()
-        cur.execute("INSERT INTO buyurtmalar(telegram_id,tur,mavzu,format,sahifalar,narx,created_at) VALUES(?,?,?,?,?,?,?)",
-            (uid, tur, mavzu, fmt, str(sah), narx, datetime.now().strftime("%d.%m.%Y %H:%M")))
+        cur.execute("""INSERT INTO buyurtmalar(telegram_id,tur,mavzu,format,sahifalar,narx,status,order_data,created_at) 
+            VALUES(?,?,?,?,?,?,?,?,?)""",
+            (uid, tur, mavzu, fmt, str(sah), narx, status,
+             json.dumps(order_data or {}, ensure_ascii=False),
+             datetime.now().strftime("%d.%m.%Y %H:%M")))
+        c.commit(); c.close()
+        return cur.lastrowid
+    except: return None
+
+def save_pending_buyurtma(uid, tur, mavzu, fmt, sah, narx, order_data):
+    """Yakunlanmagan buyurtmani saqlash"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        # Avval eski pending buyurtmani o'chirish
+        cur.execute("DELETE FROM buyurtmalar WHERE telegram_id=? AND status='pending' AND tur=?", (uid, tur))
+        cur.execute("""INSERT INTO buyurtmalar(telegram_id,tur,mavzu,format,sahifalar,narx,status,order_data,created_at) 
+            VALUES(?,?,?,?,?,?,?,?,?)""",
+            (uid, tur, mavzu, fmt, str(sah), narx, "pending",
+             json.dumps(order_data, ensure_ascii=False),
+             datetime.now().strftime("%d.%m.%Y %H:%M")))
+        c.commit()
+        row_id = cur.lastrowid
+        c.close()
+        return row_id
+    except Exception as e:
+        logger.error(f"save_pending: {e}")
+        return None
+
+def get_pending_buyurtmalar(uid):
+    """Yakunlanmagan buyurtmalarni olish"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("""SELECT id,tur,mavzu,format,sahifalar,narx,order_data,created_at 
+            FROM buyurtmalar WHERE telegram_id=? AND status='pending' 
+            ORDER BY id DESC LIMIT 5""", (uid,))
+        rows = cur.fetchall(); c.close()
+        return rows
+    except: return []
+
+def complete_buyurtma(order_id):
+    """Buyurtmani yakunlash"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("UPDATE buyurtmalar SET status='done' WHERE id=?", (order_id,))
+        c.commit(); c.close()
+    except: pass
+
+def delete_buyurtma(order_id):
+    """Buyurtmani o'chirish"""
+    try:
+        c = sqlite3.connect("edubot.db"); cur = c.cursor()
+        cur.execute("DELETE FROM buyurtmalar WHERE id=?", (order_id,))
         c.commit(); c.close()
     except: pass
 
 def get_buyurtmalar(uid):
     try:
         c = sqlite3.connect("edubot.db"); cur = c.cursor()
-        cur.execute("SELECT tur,mavzu,format,sahifalar,narx,created_at FROM buyurtmalar WHERE telegram_id=? ORDER BY id DESC LIMIT 10", (uid,))
+        cur.execute("""SELECT id,tur,mavzu,format,sahifalar,narx,status,created_at 
+            FROM buyurtmalar WHERE telegram_id=? 
+            ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END, id DESC LIMIT 15""", (uid,))
         rows = cur.fetchall(); c.close(); return rows
     except: return []
 
@@ -536,42 +595,54 @@ def clean_text(text):
 # MAZMUN YARATISH
 # ============================================================
 def gen_prez(topic, slides, lang, ud={}, plans=5):
-    """Prezentatsiya mazmuni yaratish — SLAYD N: formatida"""
+    """Prezentatsiya mazmuni yaratish — SLAYD N: formatida, har slaydda 250-350 so'z"""
     ln = LN.get(lang, "o'zbek")
     info = build_info(ud)
     subject = f"\nFan: {ud['subject']}" if ud.get('subject') else ""
+    book = f"\nManba kitob: {ud['book_name']}" if ud.get('book_name') else ""
+    
+    # Web search for real data
+    web_info = ""
+    try:
+        web_info = web_search_topic(f"{topic} statistics facts data", lang)
+    except: pass
+    
+    web_ctx = f"\n\nInternetdan topilgan ma'lumotlar:\n{web_info[:1500]}" if web_info else ""
+    source_ctx = f"\n\nFoydalaning: {ud['book_name']} kitobi ma'lumotlaridan" if ud.get('book_name') else ""
 
     prompt = (
-        f"Mavzu: {topic}\nSlaydlar soni: {slides}\n{info}{subject}\n\n"
-        f"QUYIDAGI FORMATDA YOZ. HAR SLAYD 'SLAYD N:' BILAN BOSHLANSIN:\n\n"
-        f"SLAYD 1: {topic}\n\n"
-        f"SLAYD 2: REJALAR\n"
-        f"1. Birinchi bo'lim\n"
-        f"2. Ikkinchi bo'lim\n"
-        f"3. Uchinchi bo'lim\n\n"
-        f"SLAYD 3: [Birinchi bo'lim nomi]\n"
-        f"[4-6 ta aniq fakt, raqam va statistika]\n\n"
-        f"SLAYD 4: [Ikkinchi bo'lim nomi]\n"
-        f"[4-6 ta aniq fakt, raqam va statistika]\n\n"
-        f"... shunday davom et ...\n\n"
-        f"SLAYD {slides}: XULOSA\n"
-        f"[Asosiy xulosalar]\n"
-        f"Foydalanilgan adabiyotlar: 1. ... 2. ... 3. ...\n\n"
-        f"TALABLAR:\n"
-        f"1. Har slayd 'SLAYD N:' bilan boshlansin — MAJBURIY!\n"
-        f"2. Jami {slides} ta slayd bo'lsin\n"
-        f"3. Har slaydda aniq raqamlar va statistika bo'lsin\n"
-        f"4. Faqat ilmiy manbalardan ma'lumot\n"
-        f"5. Hech qanday **, ##, * belgisi ishlatilmasin\n"
-        f"6. Imlo 100% to'g'ri bo'lsin"
+        f"Mavzu: {topic}\nSlaydlar soni: {slides}\nTil: {ln}\n{info}{subject}{book}{web_ctx}{source_ctx}\n\n"
+        f"MUHIM QOIDALAR:\n"
+        f"1. HAR SLAYD AYNAN 'SLAYD N:' bilan boshlansin\n"
+        f"2. Har slaydda KAMIDA 250-350 so'z bo'lsin — bu MAJBURIY\n"
+        f"3. Har slayd to'liq, bir butun ma'lumot bersin — o'rtada to'xtatilmasin\n"
+        f"4. Faqat ilmiy manbalar, tasdiqlangan faktlar\n"
+        f"5. Aniq raqamlar, foizlar, sanalar qo'shing\n"
+        f"6. Hech qanday **, ##, *, # belgisi ishlatilmasin\n"
+        f"7. Imlo va grammatika 100% to'g'ri bo'lsin\n\n"
+        f"FORMAT:\n"
+        f"SLAYD 1: {topic}\n"
+        f"[Kirish — mavzu haqida to'liq, 250+ so'zli matn. Mavzuning ahamiyati, dolzarbligi, tarixi. Asosiy tushunchalar tushuntirish]\n\n"
+        f"SLAYD 2: Reja va maqsad\n"
+        f"[Prezentatsiya rejasi. Har bir bo'lim haqida 2-3 jumlali tushuntirish. Maqsad va vazifalar. 250+ so'z]\n\n"
+        f"SLAYD 3: [Birinchi asosiy bo'lim]\n"
+        f"[250-350 so'zli to'liq ilmiy matn. Aniq faktlar, raqamlar, misollar. Tarixiy ma'lumotlar. Olimlar fikridan iqtiboslar]\n\n"
+        f"... {slides} gacha shu formatda davom et ...\n\n"
+        f"SLAYD {slides}: Xulosa va tavsiyalar\n"
+        f"[Barcha mavzular bo'yicha xulosalar. Amaliy tavsiyalar. Foydalanilgan adabiyotlar ro'yxati. 250+ so'z]"
     )
     system = (
-        f"Sen professional {ln} prezentatsiya mutaxassisisanm. "
-        f"'SLAYD N:' formatini qat'iy ushlab turasan. "
-        f"Markdown belgisi ishlatmaysan. Imlo xatosiz yozasan."
+        f"Sen O'zbekistonning eng tajribali {ln} prezentatsiya mutaxassisisisan. "
+        f"Har bir slaydga KAMIDA 250 so'z yozasan — bu qat'iy talab. "
+        f"SLAYD N: formatini o'zgartirmaysan. "
+        f"Markdown belgisi ISHLATMAYSAN. "
+        f"Faqat ilmiy, tasdiqlangan ma'lumotlar yozasan. "
+        f"Raqamlar, sanalar, faktlar — barchasi aniq bo'lsin."
     )
-    result = claude(prompt, system, 4000, model=SONNET_MODEL)
-    return clean_text(result)
+    result = claude(prompt, system, 8000, model=SONNET_MODEL)
+    result = result.replace("**", "").replace("## ", "").replace("# ", "").replace("##", "").replace("#", "")
+    logger.info(f"PREZ_RESULT: {result[:300]}")
+    return result
 
 def gen_doc(svc, topic, pages, lang, ud={}):
     """Hujjat yaratish (referat, kurs ishi, maqola, mustaqil)"""
@@ -823,7 +894,7 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
 
     # Slaydlarni ajratish
     clean = content.replace("**","").replace("##","").replace("#","")
-    slides = []; cur_t = topic; cur_b = []
+    slides_raw = []; cur_t = None; cur_b = []
     for line in clean.strip().split("\n"):
         line = line.strip()
         if not line: continue
@@ -831,14 +902,29 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
         is_slide = (ul.startswith("SLAYD") or ul.startswith("SLIDE") or ul.startswith("СЛАЙД")) and ":" in line
         if is_slide:
             if cur_t is not None:
-                slides.append((cur_t, cur_b[:]))
+                slides_raw.append((cur_t, cur_b[:]))
             cur_t = line.split(":", 1)[1].strip()
+            # Slayd raqamini sarlavhadan olib tashlash
+            cur_t = re.sub(r"^\d+[.:]?\s*", "", cur_t).strip() or cur_t
             cur_b = []
         else:
-            b = re.sub(r'^[-•►▸*\s]+', '', line)
+            b = re.sub(r"^[-•►▸*\s]+", "", line)
             if b: cur_b.append(b)
-    if cur_t: slides.append((cur_t, cur_b))
-    if not slides: slides = [(topic, [clean[:200]])]
+    if cur_t is not None: slides_raw.append((cur_t, cur_b))
+    # Agar SLAYD formati topilmasa, \n\n boyicha ajratish
+    if not slides_raw or len(slides_raw) < 2:
+        parts = [p.strip() for p in clean.split("\n\n") if p.strip()]
+        slides_raw = []
+        for p in parts:
+            plines = [l.strip() for l in p.split("\n") if l.strip()]
+            if plines:
+                t_s = re.sub(r"^(SLAYD|SLIDE)\s*\d+[:\.]?\s*", "", plines[0], flags=re.IGNORECASE).strip()
+                t_s = t_s or plines[0]
+                b_s = plines[1:]
+                slides_raw.append((t_s[:80], b_s))
+    if not slides_raw:
+        slides_raw = [(topic, [clean[:300]])]
+    slides = slides_raw
 
     for sn, (title, bullets) in enumerate(slides):
         sl = prs.slides.add_slide(blank)
@@ -943,12 +1029,27 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                     elif b.strip():
                         normal_b.append(b.strip())
 
-                tb2 = sl.shapes.add_textbox(Inches(0.4), Inches(1.75), Inches(txt_w), Inches(3.8))
+                tb2 = sl.shapes.add_textbox(Inches(0.4), Inches(1.75), Inches(txt_w), Inches(5.0))
                 tf2 = tb2.text_frame; tf2.word_wrap = True; first = True
-                for b in normal_b[:8]:
-                    p2 = tf2.paragraphs[0] if first else tf2.add_paragraph(); first = False
-                    p2.text = f"▸  {b}"; p2.font.size = Pt(17); p2.font.color.rgb = txc
-                    p2.space_before = Pt(4)
+                # Barcha matnni birlashtirish - 250-350 so'z
+                full_text = " ".join(normal_b)
+                # Agar matn juda qisqa bo'lsa, barchasini ko'rsatish
+                if len(normal_b) <= 3:
+                    for b in normal_b:
+                        p2 = tf2.paragraphs[0] if first else tf2.add_paragraph(); first = False
+                        p2.text = b; p2.font.size = Pt(15); p2.font.color.rgb = txc
+                        p2.space_before = Pt(6)
+                else:
+                    # Ko'p qatorli matn - paragraf sifatida ko'rsatish
+                    for b in normal_b[:15]:
+                        p2 = tf2.paragraphs[0] if first else tf2.add_paragraph(); first = False
+                        # Uzun gaplar paragraf, qisqalar bullet
+                        if len(b) > 80:
+                            p2.text = b; p2.font.size = Pt(13)
+                        else:
+                            p2.text = f"▸  {b}"; p2.font.size = Pt(14)
+                        p2.font.color.rgb = txc
+                        p2.space_before = Pt(3)
 
                 # Infografika bar chart
                 if infog:
@@ -1870,6 +1971,46 @@ def text_h(msg):
 
     # Broadcast
 
+
+    # Buyurtma mavzusini tahrirlash
+    if state == "edit_order_topic":
+        order_id = ud.get("edit_order_id")
+        if order_id:
+            try:
+                c = sqlite3.connect("edubot.db"); cur = c.cursor()
+                cur.execute("UPDATE buyurtmalar SET mavzu=? WHERE id=?", (text, order_id))
+                c.commit(); c.close()
+                bot.send_message(uid, f"✅ Mavzu yangilandi: *{text}*\n\nDavom etish uchun Buyurtmalarim bo\'limiga o\'ting.",
+                    parse_mode="Markdown", reply_markup=main_kb(uid))
+            except: bot.send_message(uid, "❌ Xato.")
+        cst(uid)
+        return
+
+    # Buyurtma bet/slayd sonini tahrirlash
+    if state == "edit_order_pages":
+        order_id = ud.get("edit_order_id")
+        if order_id and text.isdigit():
+            pages = int(text)
+            try:
+                c = sqlite3.connect("edubot.db"); cur = c.cursor()
+                cur.execute("SELECT tur,narx FROM buyurtmalar WHERE id=?", (order_id,))
+                row = cur.fetchone(); c.close()
+                if row:
+                    tur, old_narx = row
+                    price = PRICE_SLIDE if tur == "prez" else PRICE_PAGE
+                    new_narx = pages * price
+                    c2 = sqlite3.connect("edubot.db"); cur2 = c2.cursor()
+                    cur2.execute("UPDATE buyurtmalar SET sahifalar=?, narx=? WHERE id=?", (str(pages), new_narx, order_id))
+                    c2.commit(); c2.close()
+                    sl = "slayd" if tur == "prez" else "bet"
+                    bot.send_message(uid, f"✅ {pages} {sl}, narx: {new_narx:,} so'm\n\nBuyurtmalarim bo\'limidan davom eting.",
+                        parse_mode="Markdown", reply_markup=main_kb(uid))
+            except: bot.send_message(uid, "❌ Xato.")
+        else:
+            bot.send_message(uid, "❌ Raqam kiriting!", reply_markup=main_kb(uid))
+        cst(uid)
+        return
+
     # Kitob nomi kutish
     if state == "wait_book_name":
         UD.setdefault(uid, {})["book_name"] = text
@@ -2263,9 +2404,19 @@ def cb(call):
         tmpl_name = TEMPLATES.get(str(tmpl_id), TEMPLATES["1"])["name"]
         bal = get_balance(uid)
         if bal < total:
-            kb2 = types.InlineKeyboardMarkup()
+            # Yakunlanmagan buyurtmani saqlash
+            order_data = dict(ud)
+            order_data["svc"] = "prez"
+            save_pending_buyurtma(uid, "prez", topic, fmt, slides, total, order_data)
+            kb2 = types.InlineKeyboardMarkup(row_width=1)
             kb2.add(types.InlineKeyboardButton(t(uid,"topup"), callback_data="topup"))
-            bot.send_message(uid, t(uid,"no_balance",need=total,bal=bal), reply_markup=kb2); return
+            kb2.add(types.InlineKeyboardButton("📋 Buyurtmalarim", callback_data="my_orders"))
+            bot.send_message(uid,
+                f"💰 Hisobingizda yetarli mablag' yo\'q!\n"
+                f"Kerak: *{total:,} so'm*\nBalans: *{bal:,} so'm*\n\n"
+                f"Hisobni to'ldirgach Buyurtmalarim bo'limidan davom eting.",
+                parse_mode="Markdown", reply_markup=kb2)
+            cst(uid); return
         deduct(uid, total)
         pm = bot.send_message(uid, t(uid,"preparing"))
         user_imgs = UI.get(uid, [])
