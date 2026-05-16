@@ -923,66 +923,85 @@ def gen_prez(topic, slides, lang, ud={}, plans=5):
     info = build_info(ud)
     subject = f"\nFan: {ud['subject']}" if ud.get('subject') else ""
     book = f"\nManba: {ud['book_name']}" if ud.get('book_name') else ""
+    plans_count = ud.get("plans_count", plans)
+    with_diagram = ud.get("with_diagram", False)
 
     # Web search
     web_ctx = ""
     try:
-        web_info = web_search_topic(f"{topic} ma'lumotlar statistika", lang)
-        if web_info: web_ctx = f"\n\nQo'shimcha ma'lumot:\n{web_info[:1000]}"
+        web_info = web_search_topic(f"{topic} ma'lumotlar faktlar", lang)
+        if web_info: web_ctx = f"\n\nQo'shimcha ma'lumot:\n{web_info[:800]}"
     except: pass
 
-    # Har slayd uchun sarlavha
-    slide_lines = ""
-    for i in range(1, slides + 1):
-        if i == 1: slide_lines += f"SLAYD 1: {topic}\n"
-        elif i == 2: slide_lines += f"SLAYD 2: Reja\n"
-        elif i == slides: slide_lines += f"SLAYD {slides}: Xulosa\n"
-        else: slide_lines += f"SLAYD {i}: [Bo'lim sarlavhasi]\n"
+    # Bo'limlar ro'yxatini yaratish
+    bolimlar = []
+    for i in range(1, plans_count + 1):
+        bolimlar.append(f"{i}. [Bo'lim {i} sarlavhasi]")
+    bolimlar_str = "\n".join(bolimlar)
+
+    # Slaydlar ro'yxati
+    slide_plan = f"SLAYD 1: {topic}\n"
+    slide_plan += f"SLAYD 2: REJA\n"
+    slayd_num = 3
+    bolim_per_slide = max(1, (slides - 3) // plans_count)
+    for b in range(1, plans_count + 1):
+        slide_plan += f"SLAYD {slayd_num}: [Bo'lim {b} nomi]\n"
+        slayd_num += 1
+        if slayd_num >= slides:
+            break
+    slide_plan += f"SLAYD {slides}: Xulosa\n"
+
+    diag_instruction = ""
+    if with_diagram:
+        diag_instruction = (
+            f"\nDIAGRAMMA: Agar mavzuda statistik ma'lumotlar bo'lsa, "
+            f"faqat shu slaydda [DIAGRAMMA: nom | label1:son1, label2:son2] qo'sh. "
+            f"Diagramma MATN PASTIDA joylashtiriladi."
+        )
 
     prompt = f"""Mavzu: {topic}
-Slaydlar: {slides} ta
+Slaydlar soni: {slides} ta
+Bo'limlar soni: {plans_count} ta
 Til: {ln}
 {info}{subject}{book}{web_ctx}
 
-TOPSHIRIQ: Quyidagi {slides} ta slaydni to'liq yoz. HAR SLAYD "SLAYD N:" bilan boshlansin.
+TOPSHIRIQ: Quyidagi {slides} ta slaydni to'liq yoz:
 
-{slide_lines}
-QOIDALAR:
-- Har slayd SLAYD N: bilan boshlansin (masalan: SLAYD 1:, SLAYD 2:)
-- Har slaydda 250-300 so'z bo'lsin
-- SLAYD 2: Reja — keyingi slaydlar sarlavhalarini ko'rsat
-- SLAYD 3 dan boshlab Reja bo'limlari tartibida davom et
-- Haqiqiy faktlar va raqamlar ishlatilsin
-- **, ##, # belgisi ishlatilmasin
-- Faqat statistik mavzularda: [DIAGRAMMA: nom | label1:son1, label2:son2] qo'shilsin
-- Jami {slides} ta slayd yoz, kamroq yozma!"""
+{slide_plan}
 
-    system = f"""Sen {ln} tilida {slides} ta slayd yozasan.
-QOIDA 1: Har slayd "SLAYD N:" bilan boshlansin — bu MAJBURIY.
-QOIDA 2: Har slaydda 250+ so'z bo'lsin.
-QOIDA 3: Markdown belgisi (**, ##, #) ishlatilmasin.
-QOIDA 4: Jami {slides} ta slayd bo'lsin."""
+MUHIM QOIDALAR:
+1. Har slayd AYNAN "SLAYD N:" bilan boshlansin
+2. Jami {slides} ta slayd yoz — kam yozma!
+3. SLAYD 2 (REJA) da:
+   - "REJA" so'zi katta harfda MARKAZDA
+   - Quyida tartibli ro'yxat:
+{bolimlar_str}
+   - Har bo'lim haqida 1-2 jumlali qisqa tavsif
+4. SLAYD 3 dan {slides-1} gacha — Reja bo'limlari tartibida, har birida 250-300 so'z
+5. **, ##, # belgisi TAQIQLANGAN{diag_instruction}"""
 
-    # Slayd soniga qarab max_tokens hisoblash (har slayd ~400 token)
-    max_tok = min(slides * 400 + 500, 4000)
+    system = f"""Sen {ln} tilida professional prezentatsiya yozuvchisan.
+QOIDA 1: Jami {slides} ta slayd yoz — bu MAJBURIY, kamroq yozma!
+QOIDA 2: Har slayd "SLAYD N:" bilan boshlansin.
+QOIDA 3: SLAYD 2 da REJA so'zi va tartibli bo'limlar bo'lsin.
+QOIDA 4: Har slaydda 250-300 so'z bo'lsin.
+QOIDA 5: Markdown belgisi ishlatma."""
+
+    # max_tokens slayd soniga qarab
+    max_tok = min(slides * 450 + 500, 4000)
     result = claude(prompt, system, max_tok, model=SONNET_MODEL)
 
-    if not result or "API xatosi" in result or "Xatolik" in result:
-        logger.error(f"Claude failed in gen_prez: {result}")
-        # Fallback
+    if not result or "API xatosi" in result or "timeout" in result.lower():
+        logger.error(f"Claude failed in gen_prez: {result[:100]}")
         fallback = ""
         for i in range(1, slides + 1):
-            fallback += f"SLAYD {i}: {topic if i == 1 else f'Bo\'lim {i-1}'}\n"
-            fallback += f"{topic} haqida ma'lumot. Iltimos qayta urinib ko'ring.\n\n"
+            fallback += f"SLAYD {i}: {topic if i == 1 else ('Reja' if i == 2 else f'Bo\'lim {i-2}')}\n"
+            fallback += f"{topic} haqida ma'lumot.\n\n"
         return fallback
 
-    # Markdown tozalash
     result = result.replace("**", "").replace("## ", "").replace("# ", "").replace("##", "")
-
-    # Log
     count = len(re.findall(r'SLAYD\s*\d+\s*:', result, re.IGNORECASE))
-    logger.info(f"PREZ: {count} slayd. Start: {result[:150]}")
-
+    logger.info(f"PREZ: {count} slayd topildi (so'ralgan: {slides})")
     return result
 
 
@@ -1941,22 +1960,31 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
             # 2-SLAYD: REJALAR
             tb = sl.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(12.33), Inches(1.1))
             tf = tb.text_frame; tf.word_wrap = True
-            p = tf.paragraphs[0]; p.text = "📋  REJA"
-            p.font.size = Pt(34); p.font.bold = True; p.font.color.rgb = tc
+            p = tf.paragraphs[0]; p.text = "R  E  J  A"
+            p.font.size = Pt(40); p.font.bold = True; p.font.color.rgb = tc
             p.alignment = PP_ALIGN.CENTER
             try:
-                ln2 = sl.shapes.add_shape(1, Inches(2), Inches(1.4), Inches(9.33), Inches(0.07))
+                ln2 = sl.shapes.add_shape(1, Inches(1.5), Inches(1.35), Inches(10.33), Inches(0.08))
                 ln2.fill.solid(); ln2.fill.fore_color.rgb = acc; ln2.line.fill.background()
             except: pass
             if bullets:
-                tb2 = sl.shapes.add_textbox(Inches(1.5), Inches(1.6), Inches(10.33), Inches(5.6))
+                tb2 = sl.shapes.add_textbox(Inches(1.2), Inches(1.55), Inches(10.93), Inches(5.7))
                 tf2 = tb2.text_frame; tf2.word_wrap = True; first = True
-                for bi, b in enumerate(bullets[:12]):
-                    if not b.strip(): continue
+                num = 0
+                for b in bullets[:10]:
+                    b = b.strip()
+                    if not b: continue
+                    # Raqam bilan boshlanmagan bo'lsa qo'shamiz
+                    if not re.match(r'^[0-9]', b):
+                        num += 1
+                        display = f"{num}.   {b}"
+                    else:
+                        display = f"   {b}"
                     p2 = tf2.paragraphs[0] if first else tf2.add_paragraph(); first = False
-                    p2.text = f"  {bi+1}.  {b.strip()}"
-                    p2.font.size = Pt(20); p2.font.color.rgb = txc; p2.space_before = Pt(8)
-                    p2.alignment = PP_ALIGN.LEFT
+                    p2.text = display
+                    p2.font.size = Pt(19); p2.font.bold = False
+                    p2.font.color.rgb = get_contrast_color(bg1, txc)
+                    p2.space_before = Pt(10); p2.alignment = PP_ALIGN.LEFT
 
         else:
             # Oddiy slayd
@@ -2016,7 +2044,8 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                         clean_bullets.append(b)
                 normal_b = clean_bullets
                 
-                if diag_data and len(diag_data[0].get("data", [])) >= 2 and "[DIAGRAMMA" in " ".join(bullets).upper():
+                with_diag = ud.get("with_diagram", False)
+                if with_diag and diag_data and len(diag_data[0].get("data", [])) >= 2 and "[DIAGRAMMA" in " ".join(bullets).upper():
                     try:
                         add_diagram_to_slide(sl, topic, title, full_slide_text,
                                            diag_data, acc, get_contrast_color(bg1, txc), False)
@@ -2475,6 +2504,20 @@ def source_kb():
         types.InlineKeyboardButton("🌐 Umumiy mavzu (manbasisiz)", callback_data="src:none"),
         types.InlineKeyboardButton("🏠 Menyu", callback_data="bk")
     )
+    return kb
+
+def plans_kb():
+    """Nechta bo'lim bo'lsin tugmalari"""
+    kb = types.InlineKeyboardMarkup(row_width=3)
+    kb.add(
+        types.InlineKeyboardButton("3 ta", callback_data="plans:3"),
+        types.InlineKeyboardButton("4 ta", callback_data="plans:4"),
+        types.InlineKeyboardButton("5 ta", callback_data="plans:5"),
+        types.InlineKeyboardButton("6 ta", callback_data="plans:6"),
+        types.InlineKeyboardButton("7 ta", callback_data="plans:7"),
+        types.InlineKeyboardButton("8 ta", callback_data="plans:8"),
+    )
+    kb.add(types.InlineKeyboardButton("🏠 Menyu", callback_data="bk"))
     return kb
 
 def img_choice_kb():
@@ -3556,6 +3599,20 @@ def cb(call):
     if d.startswith("plans:"):
         try: bot.delete_message(uid, call.message.message_id)
         except: pass
+        plans_count = int(d[6:])
+        UD.setdefault(uid, {})["plans_count"] = plans_count
+        # Diagramma savolini ko'rsatish
+        sst(uid, "prez_diag")
+        diag_kb = types.InlineKeyboardMarkup(row_width=1)
+        diag_kb.add(
+            types.InlineKeyboardButton("📊 Ha, diagramma qo'shilsin", callback_data="diag:yes"),
+            types.InlineKeyboardButton("📝 Yo'q, faqat matn", callback_data="diag:no")
+        )
+        bot.send_message(uid,
+            f"✅ {plans_count} ta bo'lim\n\n"
+            f"📊 Diagramma va infografika qo'shilsinmi?",
+            parse_mode="Markdown", reply_markup=diag_kb)
+        return
         val = d[6:]
         if val == "custom":
             sst(uid, "prez_plans_custom")
