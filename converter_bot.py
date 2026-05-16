@@ -1778,16 +1778,18 @@ TEMPLATES = TEMPLATES_30
 
 def get_contrast_color(bg_rgb, text_rgb):
     """Fon va matn rangi bir xil bo'lsa, kontrastli rang qaytaradi"""
-    def luminance(r, g, b):
-        return 0.299 * r + 0.587 * g + 0.114 * b
+    def luminance(c):
+        if isinstance(c, RGBColor):
+            return 0.299 * c.red + 0.587 * c.green + 0.114 * c.blue
+        elif isinstance(c, (tuple, list)) and len(c) == 3:
+            return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+        return 128
     
-    bg_lum = luminance(bg_rgb.red, bg_rgb.green, bg_rgb.blue)
-    txt_lum = luminance(text_rgb.red, text_rgb.green, text_rgb.blue)
+    bg_lum = luminance(bg_rgb)
+    txt_lum = luminance(text_rgb)
     
-    # Agar farq kam bo'lsa (kontrast past)
     diff = abs(bg_lum - txt_lum)
     if diff < 60:
-        # Fon qoraga yaqin bo'lsa - oq rang
         if bg_lum < 128:
             return RGBColor(255, 255, 255)
         else:
