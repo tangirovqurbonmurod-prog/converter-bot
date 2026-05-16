@@ -1779,11 +1779,11 @@ TEMPLATES = TEMPLATES_30
 def get_contrast_color(bg_rgb, text_rgb):
     """Fon va matn rangi bir xil bo'lsa, kontrastli rang qaytaradi"""
     def luminance(c):
-        if isinstance(c, RGBColor):
-            return 0.299 * c.red + 0.587 * c.green + 0.114 * c.blue
-        elif isinstance(c, (tuple, list)) and len(c) == 3:
+        try:
+            # RGBColor tuple kabi ishlaydi: c[0], c[1], c[2]
             return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
-        return 128
+        except Exception:
+            return 128
     
     bg_lum = luminance(bg_rgb)
     txt_lum = luminance(text_rgb)
