@@ -987,20 +987,8 @@ QOIDA 3: SLAYD 2 da REJA so'zi va tartibli bo'limlar bo'lsin.
 QOIDA 4: Har slaydda 250-300 so'z bo'lsin.
 QOIDA 5: Markdown belgisi ishlatma."""
 
-    # max_tokens slayd soniga qarab
-    # Ko'p slayd bo'lsa ikki qismga bo'lib yaratamiz
-    if slides <= 10:
-        max_tok = min(slides * 450 + 500, 4000)
-        result = claude(prompt, system, max_tok, model=SONNET_MODEL)
-    else:
-        # 1-qism: 1 dan slides//2 gacha
-        mid = slides // 2
-        prompt1 = prompt + f"\n\nFAQAT SLAYD 1 dan SLAYD {mid} gacha yoz."
-        result1 = claude(prompt1, system, 4000, model=SONNET_MODEL)
-        # 2-qism: mid+1 dan slides gacha
-        prompt2 = prompt + f"\n\nFAQAT SLAYD {mid+1} dan SLAYD {slides} gacha yoz."
-        result2 = claude(prompt2, system, 4000, model=SONNET_MODEL)
-        result = (result1 or "") + "\n\n" + (result2 or "")
+    # Bitta so'rovda yaratish
+    result = claude(prompt, system, 8000, model=SONNET_MODEL)
 
     if not result or "API xatosi" in result or "timeout" in result.lower():
         logger.error(f"Claude failed in gen_prez: {result[:100]}")
@@ -3525,6 +3513,29 @@ def cb(call):
     if d == "noop":
         try: bot.answer_callback_query(call.id)
         except: pass
+        return
+
+    # Manba tanlash (referat/kurs/mustaqil/maqola)
+    if d.startswith("src:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
+        src = d[4:]
+        UD.setdefault(uid, {})["source_type"] = src
+        svc = ud.get("svc", "referat")
+        if src == "text":
+            sst(uid, "wait_book_name")
+            bot.send_message(uid,
+                "📚 Kitob yoki fan nomini yozing:\n"
+                "(Masalan: 'Biologiya 10-sinf' yoki 'Iqtisodiyot asoslari')",
+                reply_markup=bk_kb())
+        elif src == "pdf":
+            sst(uid, "wait_book_pdf")
+            bot.send_message(uid, "📄 PDF kitobni yuboring:", reply_markup=bk_kb())
+        else:
+            # Manbasisiz — to'g'ri mavzuga o'tish
+            UD[uid]["source_type"] = "none"
+            sst(uid, f"{svc}_t", svc=svc)
+            bot.send_message(uid, t(uid, "enter_topic"), reply_markup=bk_kb())
         return
 
     # Diagramma tanlash
