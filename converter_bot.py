@@ -950,9 +950,12 @@ TOPSHIRIQ: Quyidagi {slides} ta slaydni to'liq yoz. HAR SLAYD "SLAYD N:" bilan b
 QOIDALAR:
 - Har slayd SLAYD N: bilan boshlansin (masalan: SLAYD 1:, SLAYD 2:)
 - Har slaydda 250-300 so'z bo'lsin
+- SLAYD 2: Reja — keyingi slaydlar sarlavhalarini ko'rsat
+- SLAYD 3 dan boshlab Reja bo'limlari tartibida davom et
 - Haqiqiy faktlar va raqamlar ishlatilsin
 - **, ##, # belgisi ishlatilmasin
-- Iqtisod/statistika bo'lsa: [DIAGRAMMA: nom | label1:son1, label2:son2] qo'shilsin"""
+- Faqat statistik mavzularda: [DIAGRAMMA: nom | label1:son1, label2:son2] qo'shilsin
+- Jami {slides} ta slayd yoz, kamroq yozma!"""
 
     system = f"""Sen {ln} tilida {slides} ta slayd yozasan.
 QOIDA 1: Har slayd "SLAYD N:" bilan boshlansin — bu MAJBURIY.
@@ -960,7 +963,9 @@ QOIDA 2: Har slaydda 250+ so'z bo'lsin.
 QOIDA 3: Markdown belgisi (**, ##, #) ishlatilmasin.
 QOIDA 4: Jami {slides} ta slayd bo'lsin."""
 
-    result = claude(prompt, system, 3500, model=SONNET_MODEL)
+    # Slayd soniga qarab max_tokens hisoblash (har slayd ~400 token)
+    max_tok = min(slides * 400 + 500, 4000)
+    result = claude(prompt, system, max_tok, model=SONNET_MODEL)
 
     if not result or "API xatosi" in result or "Xatolik" in result:
         logger.error(f"Claude failed in gen_prez: {result}")
@@ -2011,10 +2016,8 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                         clean_bullets.append(b)
                 normal_b = clean_bullets
                 
-                if diag_data and len(diag_data[0].get("data", [])) >= 2:
+                if diag_data and len(diag_data[0].get("data", [])) >= 2 and "[DIAGRAMMA" in " ".join(bullets).upper():
                     try:
-                        # Diagramma uchun joy - pastki 35% (matn ustida emas)
-                        d_x, d_y, d_w, d_h = 0.4, 4.5, 12.5, 2.8
                         add_diagram_to_slide(sl, topic, title, full_slide_text,
                                            diag_data, acc, get_contrast_color(bg1, txc), False)
                     except Exception as de:
