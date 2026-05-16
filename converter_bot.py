@@ -2467,6 +2467,22 @@ def test_kb():
     kb.add(types.InlineKeyboardButton("🏠 Menyu", callback_data="bk"))
     return kb
 
+def pages_kb(svc="referat"):
+    """Necha bet tanlash tugmalari"""
+    kb = types.InlineKeyboardMarkup(row_width=4)
+    if svc in ("kurs", "maqola"):
+        # Kurs ishi va maqola uchun ko'proq bet
+        btns = [10, 15, 20, 25, 30, 35, 40, 50]
+    else:
+        # Referat va mustaqil ish
+        btns = [5, 8, 10, 15, 20, 25, 30, 35]
+    for b in btns:
+        kb.add(types.InlineKeyboardButton(
+            f"{b} bet", callback_data=f"pages:{b}"))
+    kb.add(types.InlineKeyboardButton("✏️ Boshqa (5-100)", callback_data="pages:custom"))
+    kb.add(types.InlineKeyboardButton("🏠 Menyu", callback_data="bk"))
+    return kb
+
 def plans_kb():
     kb = types.InlineKeyboardMarkup(row_width=4)
     for n in [3,4,5,6,7,8,10,12]:
@@ -2514,6 +2530,22 @@ def source_kb():
         types.InlineKeyboardButton("🌐 Umumiy mavzu (manbasisiz)", callback_data="src:none"),
         types.InlineKeyboardButton("🏠 Menyu", callback_data="bk")
     )
+    return kb
+
+def pages_kb(svc="referat"):
+    """Necha bet tanlash tugmalari"""
+    kb = types.InlineKeyboardMarkup(row_width=4)
+    if svc in ("kurs", "maqola"):
+        # Kurs ishi va maqola uchun ko'proq bet
+        btns = [10, 15, 20, 25, 30, 35, 40, 50]
+    else:
+        # Referat va mustaqil ish
+        btns = [5, 8, 10, 15, 20, 25, 30, 35]
+    for b in btns:
+        kb.add(types.InlineKeyboardButton(
+            f"{b} bet", callback_data=f"pages:{b}"))
+    kb.add(types.InlineKeyboardButton("✏️ Boshqa (5-100)", callback_data="pages:custom"))
+    kb.add(types.InlineKeyboardButton("🏠 Menyu", callback_data="bk"))
     return kb
 
 def plans_kb():
@@ -3689,8 +3721,40 @@ def cb(call):
                 sst(uid, f"{svc}_pages")
                 price_map = {"referat":PRICE_PAGE,"kurs":PRICE_KURS,"mustaqil":PRICE_MUSTAQIL,"maqola":PRICE_MAQOLA}
                 price = price_map.get(svc, PRICE_PAGE)
-                bot.send_message(uid, t(uid,"enter_pages",price=price), reply_markup=bk_kb())
+                bot.send_message(uid,
+                    t(uid,"enter_pages",price=price),
+                    reply_markup=pages_kb(svc))
             return
+
+    # Bet soni tanlash
+    if d.startswith("pages:"):
+        try: bot.delete_message(uid, call.message.message_id)
+        except: pass
+        val = d[6:]
+        svc = ud.get("svc", "referat")
+        if val == "custom":
+            sst(uid, f"{svc}_pages")
+            price_map = {"referat":PRICE_PAGE,"kurs":PRICE_KURS,"mustaqil":PRICE_MUSTAQIL,"maqola":PRICE_MAQOLA}
+            price = price_map.get(svc, PRICE_PAGE)
+            bot.send_message(uid,
+                f"✏️ Bet sonini kiriting (5-100):\n💰 1 bet = {price:,} so'm",
+                reply_markup=bk_kb())
+        else:
+            pages = int(val)
+            UD.setdefault(uid, {})["pages"] = pages
+            price_map = {"referat":PRICE_PAGE,"kurs":PRICE_KURS,"mustaqil":PRICE_MUSTAQIL,"maqola":PRICE_MAQOLA}
+            price = price_map.get(svc, PRICE_PAGE)
+            total = pages * price
+            UD[uid]["total"] = total
+            bal = get_balance(uid)
+            if bal < total:
+                save_pending_and_notify(uid, svc, ud.get("topic",""), "docx", pages, total, ud)
+                return
+            sst(uid, f"{svc}_lang")
+            bot.send_message(uid,
+                f"✅ *{pages} bet* × {price:,} = *{total:,} so'm*\n\n{t(uid,'ask_lang')}",
+                parse_mode="Markdown", reply_markup=lc_kb(f"{svc}_lang"))
+        return
 
     # Test savol soni
     if d.startswith("tcount:"):
