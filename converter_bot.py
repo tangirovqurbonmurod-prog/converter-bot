@@ -3746,14 +3746,22 @@ def cb(call):
             price = price_map.get(svc, PRICE_PAGE)
             total = pages * price
             UD[uid]["total"] = total
+            lang = ud.get("lang", get_lang(uid))
             bal = get_balance(uid)
             if bal < total:
                 save_pending_and_notify(uid, svc, ud.get("topic",""), "docx", pages, total, ud)
                 return
-            sst(uid, f"{svc}_lang")
+            # Balans yetarli - tasdiqlash
+            fmt_kb = types.InlineKeyboardMarkup(row_width=2)
+            fmt_kb.add(
+                types.InlineKeyboardButton("📝 DOCX", callback_data=f"dfmt:docx"),
+                types.InlineKeyboardButton("📄 PDF", callback_data=f"dfmt:pdf")
+            )
             bot.send_message(uid,
-                f"✅ *{pages} bet* × {price:,} = *{total:,} so'm*\n\n{t(uid,'ask_lang')}",
-                parse_mode="Markdown", reply_markup=lc_kb(f"{svc}_lang"))
+                f"✅ *{pages} bet* × {price:,} = *{total:,} so'm*\n"
+                f"💳 Balans: *{bal:,} so'm*\n\n"
+                f"📁 Format tanlang:",
+                parse_mode="Markdown", reply_markup=fmt_kb)
         return
 
     # Test savol soni
@@ -3926,16 +3934,52 @@ def cb(call):
         pm = bot.send_message(uid, t(uid,"preparing"))
         import threading
         def gen_test_task():
+            td_test = None
             try:
-                content = gen_test(topic, count, lang)
-                bot.send_message(uid, f"✅ *{topic}*\n\n{content[:4000]}", parse_mode="Markdown")
+                content_txt = gen_test(topic, count, lang)
+                # PDF sifatida yuborish
+                import tempfile, os as _os
+                from reportlab.pdfgen import canvas as rl_c
+                from reportlab.lib.pagesizes import A4
+                td_test = tempfile.mkdtemp()
+                pdf_path = _os.path.join(td_test, "test.pdf")
+                c2 = rl_c.Canvas(pdf_path, pagesize=A4)
+                w2, h2 = A4
+                c2.setFont("Helvetica-Bold", 14)
+                c2.drawString(40, h2-40, f"Test: {topic[:60]}")
+                c2.setFont("Helvetica", 11)
+                y2 = h2 - 70
+                for line in content_txt.split("\n"):
+                    if y2 < 50:
+                        c2.showPage()
+                        c2.setFont("Helvetica", 11)
+                        y2 = h2 - 40
+                    # Uzun qatorlarni kesish
+                    while len(line) > 90:
+                        c2.drawString(40, y2, line[:90])
+                        line = "   " + line[90:]
+                        y2 -= 16
+                        if y2 < 50:
+                            c2.showPage()
+                            c2.setFont("Helvetica", 11)
+                            y2 = h2 - 40
+                    c2.drawString(40, y2, line)
+                    y2 -= 16
+                c2.save()
+                with open(pdf_path, "rb") as f:
+                    bot.send_document(uid, f,
+                        caption=f"✅ Test tayyor!\n📝 {count} ta savol\n💰 {total:,} so'm",
+                        visible_file_name=f"test_{topic[:20]}.pdf")
                 log_act(uid, "test", topic, total)
-                save_buyurtma(uid, "test", topic, "txt", count, total)
+                save_buyurtma(uid, "test", topic, "pdf", count, total)
             except Exception as e:
                 logger.error(f"Test gen: {e}")
                 add_bal(uid, total)
                 bot.send_message(uid, t(uid,"error"))
             finally:
+                if td_test:
+                    import shutil as _sh
+                    _sh.rmtree(td_test, ignore_errors=True)
                 try: bot.delete_message(uid, pm.message_id)
                 except: pass
                 cst(uid)
