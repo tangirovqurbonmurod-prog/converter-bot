@@ -960,7 +960,7 @@ QOIDA 2: Har slaydda 250+ so'z bo'lsin.
 QOIDA 3: Markdown belgisi (**, ##, #) ishlatilmasin.
 QOIDA 4: Jami {slides} ta slayd bo'lsin."""
 
-    result = claude(prompt, system, 8000, model=SONNET_MODEL)
+    result = claude(prompt, system, 3500, model=SONNET_MODEL)
 
     if not result or "API xatosi" in result or "Xatolik" in result:
         logger.error(f"Claude failed in gen_prez: {result}")
