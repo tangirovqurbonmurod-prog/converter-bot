@@ -988,8 +988,19 @@ QOIDA 4: Har slaydda 250-300 so'z bo'lsin.
 QOIDA 5: Markdown belgisi ishlatma."""
 
     # max_tokens slayd soniga qarab
-    max_tok = min(slides * 450 + 500, 4000)
-    result = claude(prompt, system, max_tok, model=SONNET_MODEL)
+    # Ko'p slayd bo'lsa ikki qismga bo'lib yaratamiz
+    if slides <= 10:
+        max_tok = min(slides * 450 + 500, 4000)
+        result = claude(prompt, system, max_tok, model=SONNET_MODEL)
+    else:
+        # 1-qism: 1 dan slides//2 gacha
+        mid = slides // 2
+        prompt1 = prompt + f"\n\nFAQAT SLAYD 1 dan SLAYD {mid} gacha yoz."
+        result1 = claude(prompt1, system, 4000, model=SONNET_MODEL)
+        # 2-qism: mid+1 dan slides gacha
+        prompt2 = prompt + f"\n\nFAQAT SLAYD {mid+1} dan SLAYD {slides} gacha yoz."
+        result2 = claude(prompt2, system, 4000, model=SONNET_MODEL)
+        result = (result1 or "") + "\n\n" + (result2 or "")
 
     if not result or "API xatosi" in result or "timeout" in result.lower():
         logger.error(f"Claude failed in gen_prez: {result[:100]}")
@@ -1968,13 +1979,24 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                 ln2.fill.solid(); ln2.fill.fore_color.rgb = acc; ln2.line.fill.background()
             except: pass
             if bullets:
-                tb2 = sl.shapes.add_textbox(Inches(1.2), Inches(1.55), Inches(10.93), Inches(5.7))
-                tf2 = tb2.text_frame; tf2.word_wrap = True; first = True
-                num = 0
-                for b in bullets[:10]:
+                # Faqat bo'lim sarlavhalarini olish (uzun tavsiflarni emas)
+                reja_items = []
+                for b in bullets:
                     b = b.strip()
                     if not b: continue
-                    # Raqam bilan boshlanmagan bo'lsa qo'shamiz
+                    # Faqat qisqa sarlavhalar (100 belgidan kam)
+                    if len(b) < 120:
+                        reja_items.append(b)
+                    if len(reja_items) >= 8: break
+
+                # Font o'lchami slayd sig'imiga qarab
+                font_size = 22 if len(reja_items) <= 5 else (19 if len(reja_items) <= 7 else 16)
+                spacing = 12 if len(reja_items) <= 5 else (8 if len(reja_items) <= 7 else 5)
+
+                tb2 = sl.shapes.add_textbox(Inches(1.0), Inches(1.55), Inches(11.3), Inches(5.7))
+                tf2 = tb2.text_frame; tf2.word_wrap = True; first = True
+                num = 0
+                for b in reja_items:
                     if not re.match(r'^[0-9]', b):
                         num += 1
                         display = f"{num}.   {b}"
@@ -1982,9 +2004,9 @@ def make_pptx(content, topic, tmpl_id, ud={}, user_imgs=None, img_pages=None):
                         display = f"   {b}"
                     p2 = tf2.paragraphs[0] if first else tf2.add_paragraph(); first = False
                     p2.text = display
-                    p2.font.size = Pt(19); p2.font.bold = False
+                    p2.font.size = Pt(font_size); p2.font.bold = False
                     p2.font.color.rgb = get_contrast_color(bg1, txc)
-                    p2.space_before = Pt(10); p2.alignment = PP_ALIGN.LEFT
+                    p2.space_before = Pt(spacing); p2.alignment = PP_ALIGN.LEFT
 
         else:
             # Oddiy slayd
